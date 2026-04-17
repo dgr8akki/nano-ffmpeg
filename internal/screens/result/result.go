@@ -3,6 +3,8 @@ package result
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/dgr8akki/nano-ffmpeg/internal/ffmpeg"
@@ -11,6 +13,24 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
+
+// buyMeACoffeeURL is the support link opened from the result screen.
+const buyMeACoffeeURL = "https://buymeacoffee.com/dgr8akki"
+
+// openURL opens the given URL in the user's default browser. It is declared as
+// a variable so tests can stub it out.
+var openURL = func(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
+}
 
 // Model is the result screen model.
 type Model struct {
@@ -34,7 +54,7 @@ func New(outputPath string, inputSize int64) *Model {
 		outputPath: outputPath,
 		inputSize:  inputSize,
 		outputSize: outputSize,
-		options:    []string{"Do another operation", "Quit"},
+		options:    []string{"Do another operation", "Buy me a coffee ☕", "Quit"},
 	}
 }
 
@@ -65,6 +85,11 @@ func (m *Model) Update(msg tea.Msg) (screens.Screen, tea.Cmd) {
 					return screens.NavigateMsg{Screen: screens.ScreenHome}
 				}
 			case 1:
+				return m, func() tea.Msg {
+					_ = openURL(buyMeACoffeeURL)
+					return nil
+				}
+			case 2:
 				return m, tea.Quit
 			}
 		case "esc":

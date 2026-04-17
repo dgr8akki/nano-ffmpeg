@@ -110,8 +110,10 @@ func TestResultUpdate_EnterOnDefaultOptionNavigatesHome(t *testing.T) {
 
 func TestResultUpdate_EnterOnQuitReturnsTeaQuit(t *testing.T) {
 	m := New("/tmp/out.mp4", 0)
-	s, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = s.(*Model)
+	for i := 0; i < len(m.options)-1; i++ {
+		s, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = s.(*Model)
+	}
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -119,6 +121,42 @@ func TestResultUpdate_EnterOnQuitReturnsTeaQuit(t *testing.T) {
 	}
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("expected tea.QuitMsg, got %T", cmd())
+	}
+}
+
+func TestResultUpdate_EnterOnBuyMeACoffeeOpensURL(t *testing.T) {
+	orig := openURL
+	t.Cleanup(func() { openURL = orig })
+
+	var opened string
+	openURL = func(url string) error {
+		opened = url
+		return nil
+	}
+
+	m := New("/tmp/out.mp4", 0)
+	s, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = s.(*Model)
+	if m.options[m.cursor] != "Buy me a coffee ☕" {
+		t.Fatalf("expected cursor on coffee option, got %q", m.options[m.cursor])
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected cmd from Enter on coffee option")
+	}
+	if msg := cmd(); msg != nil {
+		t.Fatalf("expected nil msg, got %T", msg)
+	}
+	if opened != buyMeACoffeeURL {
+		t.Fatalf("expected openURL called with %q, got %q", buyMeACoffeeURL, opened)
+	}
+}
+
+func TestResultView_RendersCoffeeOption(t *testing.T) {
+	m := New("/tmp/out.mp4", 0)
+	if !strings.Contains(m.View(), "Buy me a coffee") {
+		t.Fatal("expected view to render Buy me a coffee option")
 	}
 }
 
