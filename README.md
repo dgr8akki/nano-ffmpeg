@@ -13,7 +13,8 @@
   <a href="#operations">Operations</a> &bull;
   <a href="#keybindings">Keybindings</a> &bull;
   <a href="#releasing">Releasing</a> &bull;
-  <a href="#contributing">Contributing</a>
+  <a href="#contributing">Contributing</a> &bull;
+  <a href="#license">License</a>
 </p>
 
 <p align="center">
@@ -520,4 +521,4 @@ Please follow existing code structure -- one package per screen, logic in `inter
 
 ## License
 
-MIT
+Released under the [MIT License](LICENSE).
