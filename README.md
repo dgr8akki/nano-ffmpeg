@@ -465,31 +465,34 @@ Snapshot of coverage by area:
 
 ## Releasing
 
-The end-to-end release flow is a single command. See [`docs/release.sh`](docs/release.sh) for the script and [`docs/Makefile`](docs/Makefile) for the wrappers.
+Releases are driven by pushing a `v*` tag from `main`. The [`Release workflow`](.github/workflows/release.yml) then runs [GoReleaser](https://goreleaser.com) to publish a GitHub Release, update the Homebrew tap (`dgr8akki/homebrew-tap`), and update the Scoop bucket (`dgr8akki/scoop-bucket`). Tap/bucket updates require `HOMEBREW_TAP_TOKEN` and `SCOOP_BUCKET_TOKEN` repo secrets.
+
+From a clean `main`:
 
 ```bash
-# Patch bump (v0.1.1 -> v0.1.2) -- default
-make -C docs release
+# 1. Sanity checks
+go test ./...
+go vet ./...
 
-# Minor / major bumps
-make -C docs release-minor
-make -C docs release-major
+# 2. (Optional) Validate the GoReleaser config locally
+goreleaser check
+goreleaser release --snapshot --clean --skip=publish
 
-# Explicit version
-make -C docs release VERSION=v1.2.3
+# 3. Pick the next version (last tag + bump). Example: v0.4.0 -> v0.5.0
+PREV=$(git describe --tags --abbrev=0)
+NEXT=v0.5.0
 
-# Sanity-check without tagging
-make -C docs pre-release
+# 4. Annotated tag whose body is the changelog since the previous tag
+git tag -a "$NEXT" -m "$NEXT
+
+$(git log "$PREV"..HEAD --pretty=format:'- %s' --reverse)"
+
+# 5. Push the tag to trigger the release workflow
+git push origin "$NEXT"
+
+# 6. Tail the workflow
+gh run watch
 ```
-
-The script:
-
-1. Refuses to run on a dirty tree or off `main`.
-2. Computes the next semver from the latest `v*` tag (or accepts an explicit version).
-3. Runs `go test ./...`, `go vet ./...`, and -- when installed -- `goreleaser check` plus a non-publishing snapshot build.
-4. Builds an annotated tag whose body is the `git log` since the previous tag.
-5. Pushes the tag, which triggers [`.github/workflows/release.yml`](.github/workflows/release.yml) to run GoReleaser, cut a GitHub Release, update the Homebrew tap (`dgr8akki/homebrew-tap`), and update the Scoop bucket (`dgr8akki/scoop-bucket`). Both require a PAT stored as a repo secret (`HOMEBREW_TAP_TOKEN`, `SCOOP_BUCKET_TOKEN`).
-6. Tails the workflow with `gh run watch` when the GitHub CLI is installed.
 
 ## Future Roadmap
 
