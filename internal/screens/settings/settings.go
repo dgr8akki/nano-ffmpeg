@@ -835,10 +835,11 @@ func (m *Model) fieldEnabled(label string) bool {
 }
 
 func (m *Model) buildConvertCommand(cmd *ffmpeg.Command) {
-	cmd.SetVideoCodec(m.fieldValue("Codec"))
+	codec := m.fieldValue("Codec")
+	cmd.SetVideoCodec(codec)
 	crfVal := m.fieldValue("Quality")
 	cmd.SetCRF(parseInt(crfVal))
-	cmd.SetPreset(m.fieldValue("Preset"))
+	cmd.SetPresetForCodec(codec, m.fieldValue("Preset"))
 	audio := m.fieldValue("Audio")
 	cmd.SetAudioCodec(audio)
 }
@@ -883,9 +884,10 @@ func (m *Model) buildTrimCommand(cmd *ffmpeg.Command) {
 }
 
 func (m *Model) buildCompressCommand(cmd *ffmpeg.Command) {
-	cmd.SetVideoCodec(m.fieldValue("Codec"))
+	codec := m.fieldValue("Codec")
+	cmd.SetVideoCodec(codec)
 	cmd.SetCRF(parseInt(m.fieldValue("Quality")))
-	cmd.SetPreset(m.fieldValue("Preset"))
+	cmd.SetPresetForCodec(codec, m.fieldValue("Preset"))
 	cmd.SetAudioCodec("copy")
 }
 func (m *Model) buildMergeCommand(cmd *ffmpeg.Command) {

@@ -120,6 +120,38 @@ func TestCommandString(t *testing.T) {
 	}
 }
 
+func TestSetPresetForCodec(t *testing.T) {
+	tests := []struct {
+		name     string
+		codec    string
+		preset   string
+		expected string
+	}{
+		{"libsvtav1 maps slow to 4", "libsvtav1", "slow", "-preset 4"},
+		{"libsvtav1 maps medium to 6", "libsvtav1", "medium", "-preset 6"},
+		{"libsvtav1 maps fast to 9", "libsvtav1", "fast", "-preset 9"},
+		{"libsvtav1 maps ultrafast to 12", "libsvtav1", "ultrafast", "-preset 12"},
+		{"libsvtav1 is case insensitive", "libsvtav1", "Slow", "-preset 4"},
+		{"libsvtav1 passes through numeric preset", "libsvtav1", "8", "-preset 8"},
+		{"libsvtav1 falls back to medium for unknown", "libsvtav1", "bogus", "-preset 6"},
+		{"libx264 keeps string preset", "libx264", "slow", "-preset slow"},
+		{"libx265 keeps string preset", "libx265", "medium", "-preset medium"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := NewCommand("/usr/bin/ffmpeg", "in.mp4", "out.mkv")
+			cmd.SetVideoCodec(tc.codec)
+			cmd.SetPresetForCodec(tc.codec, tc.preset)
+
+			str := strings.Join(cmd.Build(), " ")
+			if !strings.Contains(str, tc.expected) {
+				t.Errorf("expected %q in args, got: %s", tc.expected, str)
+			}
+		})
+	}
+}
+
 func TestNoOverwrite(t *testing.T) {
 	cmd := NewCommand("/usr/bin/ffmpeg", "in.mp4", "out.mp4")
 	cmd.Overwrite = false

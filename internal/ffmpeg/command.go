@@ -3,6 +3,7 @@ package ffmpeg
 import (
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -54,6 +55,40 @@ func (c *Command) SetCRF(crf int) *Command {
 
 // SetPreset sets the encoding preset (ultrafast to veryslow).
 func (c *Command) SetPreset(preset string) *Command {
+	return c.AddArgs("-preset", preset)
+}
+
+// svtAV1Presets maps the named UI presets to libsvtav1's integer preset scale
+// (0 = slowest/best quality, 13 = fastest). libsvtav1 rejects string presets
+// like "slow" or "medium", so they must be translated before being passed to
+// ffmpeg.
+var svtAV1Presets = map[string]string{
+	"slow":      "4",
+	"medium":    "6",
+	"fast":      "9",
+	"ultrafast": "12",
+}
+
+// SetPresetForCodec sets the encoding preset using the right format for the
+// given codec. libsvtav1 only accepts integer presets (0-13) and will fail
+// with "Invalid argument" for string presets, so named presets are mapped to
+// their integer equivalents. For all other codecs, the preset is passed
+// through unchanged.
+func (c *Command) SetPresetForCodec(codec, preset string) *Command {
+	if codec == "libsvtav1" {
+		key := strings.ToLower(strings.TrimSpace(preset))
+		if mapped, ok := svtAV1Presets[key]; ok {
+			return c.AddArgs("-preset", mapped)
+		}
+		// Pass through values that already look like an integer preset so
+		// callers can opt into the raw 0-13 scale if they want.
+		if _, err := strconv.Atoi(key); err == nil {
+			return c.AddArgs("-preset", key)
+		}
+		// Unknown value: fall back to a sensible default rather than emit an
+		// argument that ffmpeg will reject.
+		return c.AddArgs("-preset", svtAV1Presets["medium"])
+	}
 	return c.AddArgs("-preset", preset)
 }
 
