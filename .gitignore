@@ -8,3 +8,7 @@ website/node_modules/
 website/.next/
 website/out/
 docs/
+
+# nix
+result
+.direnv

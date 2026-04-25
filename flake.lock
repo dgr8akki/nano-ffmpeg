@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "flakelight": {
+      "inputs": {
+        "nixpkgs": "nixpkgs"
+      },
+      "locked": {
+        "lastModified": 1774878311,
+        "narHash": "sha256-Ou5sDaR9GydAbxJYY50fqaFYYQCwUMOwSOdTBcgy47g=",
+        "owner": "nix-community",
+        "repo": "flakelight",
+        "rev": "06ee2d1a00324727c75f1c279c4ede0d871d110d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-community",
+        "repo": "flakelight",
+        "type": "github"
+      }
+    },
+    "flakelight-go": {
+      "inputs": {
+        "flakelight": "flakelight"
+      },
+      "locked": {
+        "lastModified": 1775256861,
+        "narHash": "sha256-rkwvE3a2AcuPSpI9QsLRTNt3OJEusW2LMsfFCPmqdOg=",
+        "owner": "chikof",
+        "repo": "flakelight-go",
+        "rev": "33b0fc81b2af1ec62c316f6a57a5f6097facfc53",
+        "type": "github"
+      },
+      "original": {
+        "owner": "chikof",
+        "repo": "flakelight-go",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1774709303,
+        "narHash": "sha256-D3Q07BbIA2KnTcSXIqqu9P586uWxN74zNoCH3h2ESHg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "8110df5ad7abf5d4c0f6fb0f8f978390e77f9685",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flakelight-go": "flakelight-go"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

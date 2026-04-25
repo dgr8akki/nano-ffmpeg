@@ -2,8 +2,11 @@ package ffmpeg
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -42,10 +45,14 @@ func Detect() (*Info, error) {
 
 func findBinary(name string) (string, error) {
 	// Try PATH first
-	path, err := exec.LookPath(name)
-	if err == nil {
+	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
 	}
+
+	if p, err := findNextToExecutable(name); err == nil {
+		return p, nil
+	}
+
 	// Fallback to common and keg-only Homebrew locations.
 	for _, p := range fallbackBinaryPaths(name) {
 		if _, err := exec.LookPath(p); err == nil {
@@ -94,4 +101,31 @@ func parseVersion(ffmpegPath string) (version, buildConfig string, err error) {
 	}
 
 	return version, buildConfig, nil
+}
+
+func findNextToExecutable(name string) (string, error) {
+	exePath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine executable path: %w", err)
+	}
+
+	if resolved, err := filepath.EvalSymlinks(exePath); err == nil {
+		exePath = resolved
+	}
+
+	candidate := filepath.Join(filepath.Dir(exePath), name)
+	if runtime.GOOS == "windows" {
+		candidate += ".exe"
+	}
+
+	if fileExists(candidate) {
+		return candidate, nil
+	}
+
+	return "", fmt.Errorf("%s not found next to executable (tried %s)", name, candidate)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
