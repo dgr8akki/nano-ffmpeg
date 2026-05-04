@@ -328,7 +328,7 @@ func (m *Model) KeyHints() []ui.KeyHint {
 }
 
 func (m *Model) loadDir() {
-	entries, err := os.ReadDir(m.currentDir)
+	raw, err := os.ReadDir(m.currentDir)
 	if err != nil {
 		m.err = err
 		return
@@ -336,36 +336,41 @@ func (m *Model) loadDir() {
 
 	m.entries = nil
 
-	// Directories first
-	for _, e := range entries {
+	type resolved struct {
+		name  string
+		path  string
+		isDir bool
+		size  int64
+	}
+	var items []resolved
+	for _, e := range raw {
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		if e.IsDir() {
-			m.entries = append(m.entries, entry{
-				name:  e.Name(),
-				path:  filepath.Join(m.currentDir, e.Name()),
-				isDir: true,
-			})
-		}
-	}
-
-	// Then files (media files highlighted)
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".") || e.IsDir() {
+		path := filepath.Join(m.currentDir, e.Name())
+		// Stat follows symlinks so directory symlinks are browsable; broken
+		// symlinks return an error and are skipped.
+		info, err := os.Stat(path)
+		if err != nil {
 			continue
 		}
-		info, _ := e.Info()
-		var size int64
-		if info != nil {
-			size = info.Size()
-		}
-		m.entries = append(m.entries, entry{
+		items = append(items, resolved{
 			name:  e.Name(),
-			path:  filepath.Join(m.currentDir, e.Name()),
-			isDir: false,
-			size:  size,
+			path:  path,
+			isDir: info.IsDir(),
+			size:  info.Size(),
 		})
+	}
+
+	for _, it := range items {
+		if it.isDir {
+			m.entries = append(m.entries, entry{name: it.name, path: it.path, isDir: true})
+		}
+	}
+	for _, it := range items {
+		if !it.isDir {
+			m.entries = append(m.entries, entry{name: it.name, path: it.path, isDir: false, size: it.size})
+		}
 	}
 }
 
