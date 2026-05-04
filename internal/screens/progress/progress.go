@@ -3,6 +3,7 @@ package progress
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -99,6 +100,8 @@ func (m *Model) startRunner() tea.Cmd {
 			return DoneMsg{Err: fmt.Errorf("no ffmpeg command to execute")}
 		}
 
+		defer m.cleanupTempFiles()
+
 		for i, cmd := range m.commands {
 			runner, err := ffmpeg.NewRunner(cmd)
 			if err != nil {
@@ -144,6 +147,19 @@ func (m *Model) startRunner() tea.Cmd {
 			Err:        nil,
 			OutputPath: m.outputFile,
 			InputSize:  m.inputSize,
+		}
+	}
+}
+
+func (m *Model) cleanupTempFiles() {
+	seen := map[string]struct{}{}
+	for _, cmd := range m.commands {
+		for _, p := range cmd.Cleanup {
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			os.Remove(p)
 		}
 	}
 }

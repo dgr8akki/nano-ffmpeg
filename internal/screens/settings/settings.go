@@ -152,6 +152,62 @@ func (m *Model) adjustField(delta int) {
 			f.Cursor = len([]rune(f.Value))
 		}
 	}
+	m.reconcileCompressFields()
+}
+
+func (m *Model) reconcileCompressFields() {
+	if m.opID != operations.OpCompress {
+		return
+	}
+	twoPass := m.fieldEnabled("Two-Pass")
+	codec := m.fieldValue("Codec")
+	if twoPass && !ffmpeg.TwoPassSupported(codec) {
+		twoPass = false
+		for i := range m.fields {
+			if m.fields[i].Label == "Two-Pass" {
+				m.fields[i].Enabled = false
+				m.fields[i].Value = "false"
+			}
+		}
+	}
+
+	hasBitrate := false
+	hasQuality := false
+	for _, f := range m.fields {
+		switch f.Label {
+		case "Target Bitrate":
+			hasBitrate = true
+		case "Quality":
+			hasQuality = true
+		}
+	}
+	if twoPass == hasBitrate && twoPass != hasQuality {
+		return
+	}
+
+	quality := m.fieldValue("Quality")
+	if quality == "" {
+		quality = "23"
+	}
+	bitrate := m.fieldValue("Target Bitrate")
+	if bitrate == "" {
+		bitrate = "2500k"
+	}
+
+	preserved := map[string]Field{}
+	for _, f := range m.fields {
+		preserved[f.Label] = f
+	}
+	rebuilt := m.compressFieldsWith(twoPass, quality, bitrate)
+	for i, f := range rebuilt {
+		if prev, ok := preserved[f.Label]; ok && f.Label != "Quality" && f.Label != "Target Bitrate" && f.Label != "Two-Pass" {
+			rebuilt[i] = prev
+		}
+	}
+	m.fields = rebuilt
+	if m.cursor >= len(m.fields) {
+		m.cursor = len(m.fields) - 1
+	}
 }
 
 func (m *Model) handleTextInput(msg tea.KeyMsg) bool {
@@ -539,14 +595,37 @@ func (m *Model) trimFields() []Field {
 }
 
 func (m *Model) compressFields() []Field {
+	return m.compressFieldsWith(false, "23", "2500k")
+}
+
+func (m *Model) compressFieldsWith(twoPass bool, quality, bitrate string) []Field {
+	qualityField := Field{
+		Label:    "Quality",
+		Type:     FieldSelect,
+		Options:  []Option{{Label: "Visually Lossless", Value: "18"}, {Label: "Good", Value: "23"}, {Label: "Noticeable", Value: "28"}, {Label: "Heavy", Value: "32"}},
+		Value:    quality,
+		Selected: 1,
+	}
+	for i, opt := range qualityField.Options {
+		if opt.Value == quality {
+			qualityField.Selected = i
+			qualityField.Value = quality
+		}
+	}
+	bitrateField := Field{
+		Label:  "Target Bitrate",
+		Type:   FieldText,
+		Value:  bitrate,
+		Cursor: len([]rune(bitrate)),
+	}
+
+	first := qualityField
+	if twoPass {
+		first = bitrateField
+	}
+
 	return []Field{
-		{
-			Label:    "Quality",
-			Type:     FieldSelect,
-			Options:  []Option{{Label: "Visually Lossless", Value: "18"}, {Label: "Good", Value: "23"}, {Label: "Noticeable", Value: "28"}, {Label: "Heavy", Value: "32"}},
-			Value:    "23",
-			Selected: 1,
-		},
+		first,
 		{
 			Label:    "Codec",
 			Type:     FieldSelect,
@@ -564,8 +643,8 @@ func (m *Model) compressFields() []Field {
 		{
 			Label:   "Two-Pass",
 			Type:    FieldToggle,
-			Enabled: false,
-			Value:   "false",
+			Enabled: twoPass,
+			Value:   fmt.Sprintf("%t", twoPass),
 		},
 	}
 }
@@ -762,6 +841,17 @@ func (m *Model) buildCommands() []*ffmpeg.Command {
 		}
 		return m.buildStabilizeCommands()
 	}
+	if m.opID == operations.OpCompress && m.fieldEnabled("Two-Pass") {
+		codec := m.fieldValue("Codec")
+		if ffmpeg.TwoPassSupported(codec) {
+			return ffmpeg.BuildTwoPassCommands(
+				m.ffmpegPath, m.filePath, m.outputPath(),
+				codec, m.fieldValue("Preset"),
+				strings.TrimSpace(m.fieldValue("Target Bitrate")),
+				ffmpeg.TwoPassStatsPrefix(),
+			)
+		}
+	}
 	return []*ffmpeg.Command{m.buildCommand()}
 }
 
@@ -812,6 +902,9 @@ func (m *Model) commandPreview() string {
 func (m *Model) fallbackNotice() string {
 	if m.opID == operations.OpFilters && m.fieldValue("Filter") == "vidstab" && !m.vidstabSupported() {
 		return "vidstab filters unavailable in your ffmpeg build; using deshake fallback."
+	}
+	if m.opID == operations.OpCompress && !ffmpeg.TwoPassSupported(m.fieldValue("Codec")) {
+		return "Two-pass not supported for this codec; toggle disabled."
 	}
 	return ""
 }

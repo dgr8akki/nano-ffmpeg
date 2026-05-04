@@ -261,7 +261,7 @@ nano-ffmpeg -d ~/Videos/interview.mp4
 | **Extract Audio** | Strip video, keep audio track | MP3, AAC, FLAC, WAV, OGG, Opus; bitrate presets (64k-320k) |
 | **Resize / Scale** | Change output height | 4K, 1080p, 720p, 480p, 360p; H.264 or H.265 (aspect ratio field is shown but currently has no effect -- see `docs/future_scope.md`) |
 | **Trim / Cut** | Cut segments by time | Start/end time (end pre-filled from ffprobe); lossless cut (stream copy) toggle |
-| **Compress** | Reduce file size | CRF quality; H.264/H.265/AV1; preset speed (the Two-Pass toggle is shown but currently inert -- see `docs/future_scope.md`) |
+| **Compress** | Reduce file size | CRF quality (one-pass) or **Two-Pass** with a Target Bitrate (e.g. `2500k`) for a precise output size; H.264/H.265/AV1 (two-pass requires H.264, H.265, or VP9); preset speed. Use CRF when you want consistent visual quality and don't care about exact size; use two-pass when you need to hit a specific bitrate/file-size budget. |
 | **Merge / Concat** | Join multiple files in the same folder with the same extension | Alphabetical order; stream copy or re-encode to H.264/AAC |
 | **Add Subtitles** | Burn-in or embed existing subtitle streams from the input | Picks a subtitle track from the input file; font/size/position customization is not yet exposed |
 | **Create GIF** | Animated GIF from video | 10/15/24 fps; width presets; palette optimization (only GIF output today; WebP planned) |
@@ -319,6 +319,8 @@ nano-ffmpeg -d ~/Videos/interview.mp4
 | `Enter` | Open directory / select file |
 | `Backspace` | Go to parent directory |
 | `/` | Toggle path input mode |
+
+Symlinked directories are followed and can be entered like real directories; broken symlinks are skipped.
 
 ### Settings
 

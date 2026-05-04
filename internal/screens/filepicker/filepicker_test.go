@@ -333,3 +333,57 @@ func TestFilepickerVisibleLines_FloorEnforced(t *testing.T) {
 		t.Fatalf("expected visible lines >= 5, got %d", got)
 	}
 }
+
+func TestFilepickerLoadDir_FollowsDirectorySymlinks(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "real")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "clip.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write inside target: %v", err)
+	}
+
+	browse := t.TempDir()
+	link := filepath.Join(browse, "videos")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	m := New("ffprobe", browse)
+	if len(m.entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d: %+v", len(m.entries), m.entries)
+	}
+	if !m.entries[0].isDir {
+		t.Fatalf("symlinked directory should be marked isDir: %+v", m.entries[0])
+	}
+
+	s, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = s.(*Model)
+	if m.currentDir != link {
+		t.Fatalf("expected to enter %q, got %q", link, m.currentDir)
+	}
+	if len(m.entries) != 1 || m.entries[0].name != "clip.mp4" {
+		t.Fatalf("expected to list target contents, got %+v", m.entries)
+	}
+}
+
+func TestFilepickerLoadDir_SkipsBrokenSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink(filepath.Join(dir, "missing-target"), filepath.Join(dir, "broken")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ok.mp4"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	m := New("ffprobe", dir)
+	for _, e := range m.entries {
+		if e.name == "broken" {
+			t.Fatalf("broken symlink should be skipped, got entries: %+v", m.entries)
+		}
+	}
+	if len(m.entries) != 1 || m.entries[0].name != "ok.mp4" {
+		t.Fatalf("expected only ok.mp4, got %+v", m.entries)
+	}
+}
