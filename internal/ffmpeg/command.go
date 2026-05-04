@@ -14,6 +14,13 @@ type Command struct {
 	Output     string
 	Args       []string
 	Overwrite  bool
+	Cleanup    []string
+}
+
+// AddCleanup registers temp files to remove once the command has finished.
+func (c *Command) AddCleanup(paths ...string) *Command {
+	c.Cleanup = append(c.Cleanup, paths...)
+	return c
 }
 
 // NewCommand creates a new ffmpeg command builder.
