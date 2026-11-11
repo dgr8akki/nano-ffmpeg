@@ -28,7 +28,7 @@ var (
 	frameRe   = regexp.MustCompile(`frame=\s*(\d+)`)
 	fpsRe     = regexp.MustCompile(`fps=\s*([\d.]+)`)
 	qualityRe = regexp.MustCompile(`q=\s*([\d.-]+)`)
-	sizeRe    = regexp.MustCompile(`(?:L?size|Lsize)=\s*(\d+)\s*kB`)
+	sizeRe    = regexp.MustCompile(`L?size=\s*(\d+)\s*(?:kB|KiB)`) // ffmpeg 7+ prints KiB
 	timeRe    = regexp.MustCompile(`time=\s*(\d+):(\d+):(\d+)\.(\d+)`)
 	bitrateRe = regexp.MustCompile(`bitrate=\s*([\d.]+)\s*kbits/s`)
 	speedRe   = regexp.MustCompile(`speed=\s*([\d.]+)x`)

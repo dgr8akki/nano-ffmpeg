@@ -3,7 +3,6 @@
 package ffmpeg
 
 import (
-	"os"
 	"os/exec"
 )
 
@@ -11,8 +10,8 @@ import (
 // process groups; signalling the process directly is the best we can do.
 func configureProcessGroup(_ *exec.Cmd) {}
 
-// sendInterrupt delivers os.Interrupt to the running process. Go maps this to
-// the closest native equivalent on Windows.
+// sendInterrupt stops the process. Go does not implement os.Interrupt on
+// Windows (Signal returns an error), so the process is killed outright.
 func sendInterrupt(cmd *exec.Cmd) error {
-	return cmd.Process.Signal(os.Interrupt)
+	return cmd.Process.Kill()
 }

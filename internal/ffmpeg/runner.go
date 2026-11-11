@@ -89,6 +89,14 @@ func (r *Runner) Cancel() error {
 	return sendInterrupt(r.cmd)
 }
 
+// Kill force-stops the process if it ignored Cancel.
+func (r *Runner) Kill() error {
+	if r.cmd == nil || r.cmd.Process == nil {
+		return nil
+	}
+	return r.cmd.Process.Kill()
+}
+
 // CleanupOutput removes the partial output file.
 func (r *Runner) CleanupOutput() {
 	if r.outputPath == "" || r.outputPath == "-" {

@@ -257,3 +257,23 @@ func TestConfigAndCachePath_UsesHomeDir(t *testing.T) {
 		t.Fatalf("unexpected cache filename: %q", got)
 	}
 }
+
+// ffmpeg 8+ dropped the command-support column: flags are two chars wide.
+func TestParseFilters_FFmpeg8TwoColumnFlags(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires POSIX shell")
+	}
+	bin := writeFakeBinary(t, `Filters:
+  T.. = Timeline support
+  ------
+ TS aap               AA->A      Apply Affine Projection algorithm.
+ .. deshake           V->V       Stabilize shaky video.
+ .. movie             |->N       Read from a movie source.`)
+	filters, err := parseFilters(bin)
+	if err != nil {
+		t.Fatalf("parseFilters: %v", err)
+	}
+	if strings.Join(filters, ",") != "aap,deshake,movie" {
+		t.Fatalf("got %v", filters)
+	}
+}

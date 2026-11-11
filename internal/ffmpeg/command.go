@@ -12,6 +12,7 @@ type Command struct {
 	FFmpegPath string
 	Input      string
 	Output     string
+	InputArgs  []string // placed before -i (input seeking, demuxer options)
 	Args       []string
 	Overwrite  bool
 }
@@ -35,6 +36,12 @@ func (c *Command) AddArg(arg string) *Command {
 // AddArgs adds a flag-value pair.
 func (c *Command) AddArgs(flag, value string) *Command {
 	c.Args = append(c.Args, flag, value)
+	return c
+}
+
+// AddInputArgs adds a flag-value pair that applies to the input (before -i).
+func (c *Command) AddInputArgs(flag, value string) *Command {
+	c.InputArgs = append(c.InputArgs, flag, value)
 	return c
 }
 
@@ -178,6 +185,7 @@ func (c *Command) Build() []string {
 	if c.Overwrite {
 		args = append(args, "-y")
 	}
+	args = append(args, c.InputArgs...)
 	args = append(args, "-i", c.Input)
 	args = append(args, c.Args...)
 	args = append(args, c.Output)

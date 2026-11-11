@@ -177,7 +177,8 @@ func parseFilters(ffmpegPath string) ([]string, error) {
 		return nil, err
 	}
 
-	filterNameRe := regexp.MustCompile(`^\s*[T.][S.][C.]\s+(\S+)\s+`)
+	// ffmpeg <= 7 prints three flag columns (T.C), ffmpeg 8+ prints two (TS).
+	filterNameRe := regexp.MustCompile(`^\s*[T.][S.][C.]?\s+(\S+)\s+\S*->`)
 	var filters []string
 	inList := false
 	for _, line := range strings.Split(string(out), "\n") {
@@ -238,7 +239,8 @@ func loadCachedCapabilities(currentVersion string) (*Capabilities, error) {
 		return nil, err
 	}
 
-	if caps.Version != currentVersion {
+	// An empty filter list is a cache written by the pre-ffmpeg-8 parser.
+	if caps.Version != currentVersion || len(caps.Filters) == 0 {
 		return nil, nil
 	}
 
