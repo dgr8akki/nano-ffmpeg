@@ -3,10 +3,10 @@ package operations
 import (
 	"strings"
 
-	"github.com/dgr8akki/nano-ffmpeg/internal/screens"
-	"github.com/dgr8akki/nano-ffmpeg/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/dgr8akki/nano-ffmpeg/internal/screens"
+	"github.com/dgr8akki/nano-ffmpeg/internal/ui"
 )
 
 // OperationID identifies an operation type.
@@ -43,16 +43,16 @@ type OperationSelectedMsg struct {
 var AllOperations = []Operation{
 	{ID: OpConvert, Name: "Convert Format", Desc: "Change container or codec (MP4, MKV, WebM, MP3...)", Icon: ">>"},
 	{ID: OpExtractAudio, Name: "Extract Audio", Desc: "Strip video track, keep audio", Icon: "♪ "},
-	{ID: OpResize, Name: "Resize / Scale", Desc: "Change resolution, handle aspect ratio", Icon: "[]"},
-	{ID: OpTrim, Name: "Trim / Cut", Desc: "Cut segments by time or frame", Icon: "✂ "},
+	{ID: OpResize, Name: "Resize / Scale", Desc: "Change resolution, keep aspect ratio", Icon: "[]"},
+	{ID: OpTrim, Name: "Trim / Cut", Desc: "Cut a segment by start/end time", Icon: "✂ "},
 	{ID: OpCompress, Name: "Compress", Desc: "Reduce file size with quality control", Icon: "↓ "},
-	{ID: OpMerge, Name: "Merge / Concat", Desc: "Join multiple files together", Icon: "++"},
-	{ID: OpSubtitles, Name: "Add Subtitles", Desc: "Burn-in or embed subtitle tracks", Icon: "T "},
-	{ID: OpGIF, Name: "Create GIF/WebP", Desc: "Animated image from video", Icon: "◎ "},
+	{ID: OpMerge, Name: "Merge / Concat", Desc: "Join same-type files in the folder", Icon: "++"},
+	{ID: OpSubtitles, Name: "Add Subtitles", Desc: "Burn in or re-mux the file's subtitle tracks", Icon: "T "},
+	{ID: OpGIF, Name: "Create GIF", Desc: "Animated GIF from a video clip", Icon: "◎ "},
 	{ID: OpThumbnails, Name: "Extract Thumbnails", Desc: "Grab frames as images", Icon: "▣ "},
-	{ID: OpWatermark, Name: "Watermark", Desc: "Image or text overlay", Icon: "✦ "},
+	{ID: OpWatermark, Name: "Watermark", Desc: "Semi-transparent box overlay", Icon: "✦ "},
 	{ID: OpAudio, Name: "Audio Adjustments", Desc: "Normalize, volume, fade in/out", Icon: "♫ "},
-	{ID: OpFilters, Name: "Video Filters", Desc: "Stabilize, crop, color, speed", Icon: "◈ "},
+	{ID: OpFilters, Name: "Video Filters", Desc: "Stabilize, deinterlace, speed, rotate, flip", Icon: "◈ "},
 }
 
 // Model is the operations screen model.

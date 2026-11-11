@@ -3,8 +3,10 @@ package progress
 import (
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -59,6 +61,8 @@ type Model struct {
 	done         bool
 	err          error
 	canceling    bool
+	canceled     atomic.Bool
+	finished     chan struct{} // closed when the runner goroutine returns
 	width        int
 	height       int
 	spinnerFrame int
@@ -76,6 +80,7 @@ func New(commands []*ffmpeg.Command, totalDuration float64, inputSize int64) *Mo
 		maxLogLines:  50,
 		inputSize:    inputSize,
 		spinnerChars: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		finished:     make(chan struct{}),
 	}
 	if len(commands) == 0 {
 		m.err = fmt.Errorf("no ffmpeg command to execute")
@@ -95,11 +100,15 @@ func (m *Model) Init() tea.Cmd {
 
 func (m *Model) startRunner() tea.Cmd {
 	return func() tea.Msg {
+		defer close(m.finished)
 		if len(m.commands) == 0 {
 			return DoneMsg{Err: fmt.Errorf("no ffmpeg command to execute")}
 		}
 
 		for i, cmd := range m.commands {
+			if m.canceled.Load() {
+				return DoneMsg{Err: fmt.Errorf("canceled")}
+			}
 			runner, err := ffmpeg.NewRunner(cmd)
 			if err != nil {
 				return DoneMsg{Err: err}
@@ -140,12 +149,46 @@ func (m *Model) startRunner() tea.Cmd {
 		}
 
 		m.setRunner(nil)
+		if !outputWritten(m.outputFile) {
+			return DoneMsg{Err: fmt.Errorf("ffmpeg finished but wrote no output (is the time past the end of the file?)")}
+		}
 		return DoneMsg{
 			Err:        nil,
 			OutputPath: m.outputFile,
 			InputSize:  m.inputSize,
 		}
 	}
+}
+
+// outputWritten checks the output exists and is non-empty. For image
+// sequences (name contains a %d pattern) it checks the first frame.
+func outputWritten(path string) bool {
+	if strings.Contains(path, "%03d") {
+		path = fmt.Sprintf(path, 1)
+	}
+	info, err := os.Stat(path)
+	return err == nil && info.Size() > 0
+}
+
+// Cancel stops ffmpeg, waits for it to exit (killing it after 3s) and removes
+// the partial output. Safe to call when nothing is running.
+func (m *Model) Cancel() {
+	if m.done || m.err != nil {
+		return
+	}
+	m.canceled.Store(true)
+	runner := m.activeRunner()
+	if runner == nil {
+		return
+	}
+	runner.Cancel()
+	select {
+	case <-m.finished:
+	case <-time.After(3 * time.Second):
+		runner.Kill()
+		<-m.finished
+	}
+	runner.CleanupOutput()
 }
 
 func (m *Model) setRunner(r *ffmpeg.Runner) {
@@ -202,13 +245,16 @@ func (m *Model) Update(msg tea.Msg) (screens.Screen, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		if m.done && m.err != nil {
+			if s := msg.String(); s == "esc" || s == "enter" {
+				return m, func() tea.Msg { return screens.BackMsg{} }
+			}
+			return m, nil
+		}
 		if m.canceling {
 			switch msg.String() {
 			case "y":
-				if runner := m.activeRunner(); runner != nil {
-					runner.Cancel()
-					runner.CleanupOutput()
-				}
+				m.Cancel()
 				m.done = true
 				return m, func() tea.Msg { return screens.BackMsg{} }
 			case "n", "esc":
@@ -237,6 +283,10 @@ func (m *Model) View() string {
 	if m.err != nil && m.done {
 		b.WriteString(ui.ErrorStyle.Render("  Encoding failed: " + m.err.Error()))
 		if detail := m.errorDetail(); detail != "" {
+			if friendly := ffmpeg.TranslateError(detail); friendly != "" && friendly != detail {
+				b.WriteString("\n\n")
+				b.WriteString(ui.WarningStyle.Render("  " + friendly))
+			}
 			b.WriteString("\n")
 			b.WriteString(ui.MutedStyle.Render("  ffmpeg: " + detail))
 		}
@@ -406,6 +456,9 @@ func (m *Model) Breadcrumb() string {
 }
 
 func (m *Model) KeyHints() []ui.KeyHint {
+	if m.done && m.err != nil {
+		return []ui.KeyHint{{Key: "Esc", Desc: "Back to settings"}}
+	}
 	if m.canceling {
 		return []ui.KeyHint{
 			{Key: "y", Desc: "Confirm cancel"},
@@ -424,21 +477,21 @@ func shortPath(path string) string {
 	return path
 }
 
+// errorDetail returns the first error-looking ffmpeg line: the root cause
+// comes first, later lines ("Conversion failed!") are fallout.
 func (m *Model) errorDetail() string {
-	for i := len(m.logLines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(m.logLines[i])
-		if line == "" {
+	keywords := []string{"error", "invalid", "failed", "unable", "cannot", "not found",
+		"unknown", "supported", "no such", "does not contain", "aborting"}
+	for _, raw := range m.logLines {
+		line := strings.TrimSpace(raw)
+		lower := strings.ToLower(line)
+		if line == "" || lower == "conversion failed!" {
 			continue
 		}
-
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "error") ||
-			strings.Contains(lower, "invalid") ||
-			strings.Contains(lower, "failed") ||
-			strings.Contains(lower, "unable") ||
-			strings.Contains(lower, "cannot") ||
-			strings.Contains(lower, "not found") {
-			return line
+		for _, k := range keywords {
+			if strings.Contains(lower, k) {
+				return line
+			}
 		}
 	}
 

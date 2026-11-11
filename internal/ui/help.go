@@ -146,7 +146,6 @@ func SettingsHelp() []HelpSection {
 				{Key: "↓ / j", Desc: "Next field"},
 				{Key: "← / →", Desc: "Change value / toggle"},
 				{Key: "Enter", Desc: "Execute ffmpeg command"},
-				{Key: "c", Desc: "Copy command to clipboard"},
 				{Key: "Esc", Desc: "Go back"},
 			},
 		},

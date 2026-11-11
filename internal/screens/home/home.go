@@ -5,32 +5,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/dgr8akki/nano-ffmpeg/internal/ffmpeg"
-	"github.com/dgr8akki/nano-ffmpeg/internal/screens"
-	"github.com/dgr8akki/nano-ffmpeg/internal/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/dgr8akki/nano-ffmpeg/internal/ffmpeg"
+	"github.com/dgr8akki/nano-ffmpeg/internal/screens"
+	"github.com/dgr8akki/nano-ffmpeg/internal/screens/operations"
+	"github.com/dgr8akki/nano-ffmpeg/internal/ui"
 )
-
-type operation struct {
-	name string
-	desc string
-}
-
-var operations = []operation{
-	{name: "Convert Format", desc: "Change container or codec"},
-	{name: "Extract Audio", desc: "Strip video, keep audio"},
-	{name: "Resize / Scale", desc: "Change resolution"},
-	{name: "Trim / Cut", desc: "Cut segments by time"},
-	{name: "Compress", desc: "Reduce file size"},
-	{name: "Merge / Concat", desc: "Join multiple files"},
-	{name: "Add Subtitles", desc: "Burn-in or embed subs"},
-	{name: "Create GIF/WebP", desc: "Animated image from video"},
-	{name: "Extract Thumbnails", desc: "Grab frames from video"},
-	{name: "Watermark", desc: "Image or text overlay"},
-	{name: "Audio Adjustments", desc: "Normalize, fade, volume"},
-	{name: "Video Filters", desc: "Stabilize, crop, color"},
-}
 
 // Model is the home screen model.
 type Model struct {
@@ -68,14 +49,14 @@ func (m *Model) Update(msg tea.Msg) (screens.Screen, tea.Cmd) {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(operations)-1 {
+			if m.cursor < len(operations.AllOperations)-1 {
 				m.cursor++
 			}
 		case "enter":
 			return m, func() tea.Msg {
 				return screens.NavigateMsg{
 					Screen:  screens.ScreenFilePicker,
-					Payload: operations[m.cursor],
+					Payload: operations.AllOperations[m.cursor],
 				}
 			}
 		}
@@ -113,25 +94,25 @@ func (m *Model) View() string {
 	b.WriteString(ui.SubtitleStyle.Render("OPERATIONS"))
 	b.WriteString("\n\n")
 
-	for i, op := range operations {
+	for i, op := range operations.AllOperations {
 		if i == m.cursor {
 			indicator := lipgloss.NewStyle().
 				Foreground(ui.ColorPrimary).
 				Bold(true).
 				Render(" > ")
-			name := ui.SelectedStyle.Render(op.name)
+			name := ui.SelectedStyle.Render(op.Name)
 			desc := lipgloss.NewStyle().
 				Foreground(ui.ColorDim).
-				Render("  " + op.desc)
+				Render("  " + op.Desc)
 			b.WriteString(indicator + name + desc + "\n")
 		} else {
 			name := lipgloss.NewStyle().
 				Foreground(ui.ColorText).
 				PaddingLeft(3).
-				Render(op.name)
+				Render(op.Name)
 			desc := lipgloss.NewStyle().
 				Foreground(ui.ColorMuted).
-				Render("  " + op.desc)
+				Render("  " + op.Desc)
 			b.WriteString(name + desc + "\n")
 		}
 	}

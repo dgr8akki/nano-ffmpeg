@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/dgr8akki/nano-ffmpeg/internal/ffmpeg"
 	"github.com/dgr8akki/nano-ffmpeg/internal/screens"
 	"github.com/dgr8akki/nano-ffmpeg/internal/ui"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 var mediaExtensions = map[string]bool{
@@ -62,6 +62,7 @@ func New(ffprobePath string, startDir string) *Model {
 		currentDir:  startDir,
 	}
 	m.loadDir()
+	m.probeSelected()
 	return m
 }
 
@@ -102,20 +103,17 @@ func (m *Model) updateBrowser(msg tea.KeyMsg) (screens.Screen, tea.Cmd) {
 		if m.cursor < len(m.entries) {
 			e := m.entries[m.cursor]
 			if e.isDir {
-				m.currentDir = e.path
-				m.cursor = 0
-				m.offset = 0
-				m.loadDir()
-				m.probeResult = nil
+				m.changeDir(e.path)
 			} else {
-				// File selected -- probe and return message
-				if m.probeResult != nil {
-					return m, func() tea.Msg {
-						return FileSelectedMsg{
-							Path:        e.path,
-							ProbeResult: m.probeResult,
-						}
-					}
+				// Probe on demand: the preview only covers known media
+				// extensions, but ffprobe may still read the file.
+				probe, err := ffmpeg.Probe(m.ffprobePath, e.path)
+				if err != nil {
+					m.err = fmt.Errorf("ffprobe can't read %s as media", e.name)
+					return m, nil
+				}
+				return m, func() tea.Msg {
+					return FileSelectedMsg{Path: e.path, ProbeResult: probe}
 				}
 			}
 		}
@@ -123,16 +121,12 @@ func (m *Model) updateBrowser(msg tea.KeyMsg) (screens.Screen, tea.Cmd) {
 		return m, func() tea.Msg { return screens.BackMsg{} }
 	case "/":
 		m.pathInput = true
-		m.pathText = m.currentDir + "/"
+		m.pathText = m.currentDir + string(filepath.Separator)
 	case "backspace":
 		// Go to parent directory
 		parent := filepath.Dir(m.currentDir)
 		if parent != m.currentDir {
-			m.currentDir = parent
-			m.cursor = 0
-			m.offset = 0
-			m.loadDir()
-			m.probeResult = nil
+			m.changeDir(parent)
 		}
 	}
 	return m, nil
@@ -144,23 +138,21 @@ func (m *Model) updatePathInput(msg tea.KeyMsg) (screens.Screen, tea.Cmd) {
 		m.pathInput = false
 	case "enter":
 		m.pathInput = false
-		info, err := os.Stat(m.pathText)
+		path := expandPath(m.pathText)
+		info, err := os.Stat(path)
 		if err != nil {
 			m.err = err
 			return m, nil
 		}
 		if info.IsDir() {
-			m.currentDir = m.pathText
-			m.cursor = 0
-			m.offset = 0
-			m.loadDir()
+			m.changeDir(path)
 		} else {
 			// It's a file -- probe it
-			probe, err := ffmpeg.Probe(m.ffprobePath, m.pathText)
+			probe, err := ffmpeg.Probe(m.ffprobePath, path)
 			if err == nil {
 				return m, func() tea.Msg {
 					return FileSelectedMsg{
-						Path:        m.pathText,
+						Path:        path,
 						ProbeResult: probe,
 					}
 				}
@@ -168,12 +160,13 @@ func (m *Model) updatePathInput(msg tea.KeyMsg) (screens.Screen, tea.Cmd) {
 			m.err = err
 		}
 	case "backspace":
-		if len(m.pathText) > 0 {
-			m.pathText = m.pathText[:len(m.pathText)-1]
+		if r := []rune(m.pathText); len(r) > 0 {
+			m.pathText = string(r[:len(r)-1])
 		}
 	default:
-		if len(msg.String()) == 1 {
-			m.pathText += msg.String()
+		// KeyRunes covers typing, non-ASCII characters and pasted paths.
+		if msg.Type == tea.KeyRunes || msg.Type == tea.KeySpace {
+			m.pathText += string(msg.Runes)
 		}
 	}
 	return m, nil
@@ -325,6 +318,30 @@ func (m *Model) KeyHints() []ui.KeyHint {
 		{Key: "/", Desc: "Path input"},
 		{Key: "Esc", Desc: "Back"},
 	}
+}
+
+// CapturesText reports whether the path input has focus, so global shortcuts
+// like q and ? are typed instead of triggered.
+func (m *Model) CapturesText() bool { return m.pathInput }
+
+func (m *Model) changeDir(dir string) {
+	m.currentDir = dir
+	m.cursor = 0
+	m.offset = 0
+	m.loadDir()
+	m.probeSelected()
+}
+
+// expandPath trims whitespace and quotes (common when pasting from Finder or
+// a shell) and expands a leading ~.
+func expandPath(p string) string {
+	p = strings.Trim(strings.TrimSpace(p), `"'`)
+	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, p[1:])
+		}
+	}
+	return p
 }
 
 func (m *Model) loadDir() {

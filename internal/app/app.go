@@ -26,6 +26,7 @@ type Model struct {
 	frame        *ui.Frame
 	statusLine   string
 	selectedFile *filepicker.FileSelectedMsg
+	pendingOp    *operations.Operation // picked on Home before choosing a file
 	showHelp     bool
 	width        int
 	height       int
@@ -89,6 +90,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			return m.quit()
+		}
+		// While a text field has focus, q and ? are just characters.
+		if tc, ok := m.screen.(interface{ CapturesText() bool }); ok && tc.CapturesText() && !m.showHelp {
+			break
+		}
 		// Help toggle intercepts everything
 		if msg.String() == "?" {
 			m.showHelp = !m.showHelp
@@ -100,12 +108,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "q":
-			return m, tea.Quit
+		if msg.String() == "q" {
+			return m.quit()
 		}
 
 	case screens.NavigateMsg:
@@ -114,7 +118,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = home.New(m.ffmpegInfo, m.caps, m.config.RecentFiles)
 			m.statusLine = ""
 			m.selectedFile = nil
+			m.pendingOp = nil
 			return m, m.screen.Init()
+		}
+		if op, ok := msg.Payload.(operations.Operation); ok && msg.Screen == screens.ScreenFilePicker {
+			m.pendingOp = &op
 		}
 		m.pushScreen(m.resolveScreen(msg))
 		return m, m.screen.Init()
@@ -126,6 +134,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.config.AddRecentFile(msg.Path)
 		_ = m.config.Save()
 		m.pushScreen(operations.New())
+		if op := m.pendingOp; op != nil {
+			// Home already chose the operation; go straight to its settings.
+			m.pendingOp = nil
+			return m.Update(operations.OperationSelectedMsg{Operation: *op})
+		}
 		return m, m.screen.Init()
 
 	case operations.OperationSelectedMsg:
@@ -137,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedFile.ProbeResult,
 				m.ffmpegInfo.FFmpegPath,
 			)
+			if dir := m.config.DefaultOutputDir; dir != "" {
+				s.SetOutputDir(dir)
+			}
 			m.pushScreen(s)
 			return m, m.screen.Init()
 		}
@@ -144,6 +160,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settings.ExecuteMsg:
 		if m.selectedFile != nil {
 			totalDuration := m.selectedFile.ProbeResult.Format.Duration
+			if msg.Duration > 0 {
+				totalDuration = msg.Duration
+			}
 			inputSize := m.selectedFile.ProbeResult.Format.Size
 			ps := progress.New(msg.Commands, totalDuration, inputSize)
 			m.pushScreen(ps)
@@ -190,6 +209,15 @@ func (m Model) View() string {
 	hints := m.screen.KeyHints()
 	breadcrumb := m.screen.Breadcrumb()
 	return m.frame.Render(breadcrumb, m.statusLine, content, hints)
+}
+
+// quit stops any running ffmpeg job (and removes its partial output) before
+// exiting, so quitting never leaves an orphaned encode behind.
+func (m Model) quit() (tea.Model, tea.Cmd) {
+	if c, ok := m.screen.(interface{ Cancel() }); ok {
+		c.Cancel()
+	}
+	return m, tea.Quit
 }
 
 func (m Model) helpForCurrentScreen() []ui.HelpSection {
