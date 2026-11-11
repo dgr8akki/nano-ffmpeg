@@ -141,17 +141,17 @@ export default function DocsPage() {
           {/* Operations */}
           <Section id="operations" title="Operations">
             <div className="space-y-4">
-              <OpDoc name="Convert Format" desc="Change container format (MP4, MKV, WebM, AVI, MOV) and video codec (H.264, H.265, AV1, VP9). Quality presets from High to Tiny, preset speed slow/medium/fast/ultrafast, and audio codec (copy, AAC, MP3, Opus)." />
-              <OpDoc name="Extract Audio" desc="Strip video track, keep audio. Output to MP3, AAC, FLAC, WAV, OGG, or Opus. Bitrate presets from CD Quality (320k) down to Lo-fi (64k). The chosen format maps to a fixed encoder; there is no automatic stream copy today." />
-              <OpDoc name="Resize / Scale" desc="Scale to 4K, 1080p, 720p, 480p, or 360p height (width is auto-derived). Codec choice: H.264 or H.265. An aspect-ratio field is rendered but currently has no effect -- see the Future Scope doc." />
-              <OpDoc name="Trim / Cut" desc="Set start and end time in HH:MM:SS format. Lossless cut (stream copy) toggle. End time is pre-filled with the input's total duration from ffprobe." />
-              <OpDoc name="Compress" desc="CRF quality: Visually Lossless (18) to Heavy (32). Codec choice: H.264, H.265, AV1. Preset speed: slow/medium/fast. (A Two-Pass toggle is shown in the UI but is not yet wired up -- see the Future Scope doc.)" />
-              <OpDoc name="Merge / Concat" desc="Joins every file in the input's folder that shares the same extension, in alphabetical order, using ffmpeg's concat demuxer. Stream-copy or re-encode to H.264/AAC. No reorder UI yet." />
-              <OpDoc name="Add Subtitles" desc="Burn-in (hardcode) or soft-embed subtitle streams already present in the input file. Pick which subtitle track to use. Font, size, and position customization are not yet exposed." />
+              <OpDoc name="Convert Format" desc="Change container format (MP4, MKV, WebM, AVI, MOV) and video codec (H.264, H.265, AV1, VP9). Quality presets from High to Tiny, preset speed slow/medium/fast/ultrafast, and audio codec (copy, AAC, MP3, Opus). Picks the container can't hold are swapped with a notice: WebM uses VP9 + Opus, MOV uses H.264 instead of AV1/VP9." />
+              <OpDoc name="Extract Audio" desc="Strip video track, keep audio. Output to MP3, AAC, FLAC, WAV, OGG, or Opus. Bitrate presets from CD Quality (320k) down to Lo-fi (64k). The chosen format maps to a fixed encoder; there is no automatic stream copy today. FLAC and WAV ignore the bitrate. OGG uses Opus when your ffmpeg has no libvorbis (Homebrew's default build)." />
+              <OpDoc name="Resize / Scale" desc="Scale to 4K, 1080p, 720p, 480p, or 360p height (width is auto-derived). Width follows the source aspect ratio, rounded to an even number. Codec choice: H.264 or H.265." />
+              <OpDoc name="Trim / Cut" desc="Set start and end time as HH:MM:SS, MM:SS or seconds. Lossless cut (stream copy) toggle; lossless cuts start on the nearest keyframe. End time is pre-filled with the input's total duration from ffprobe. Invalid times, an end before the start, or a start past the end are flagged before anything runs." />
+              <OpDoc name="Compress" desc="CRF quality: Visually Lossless (18) to Heavy (32). Codec choice: H.264, H.265, AV1. Preset speed: slow/medium/fast." />
+              <OpDoc name="Merge / Concat" desc="Joins every file in the input's folder that shares the same extension, in alphabetical order, using ffmpeg's concat demuxer. Settings lists the files before you run it, and the merge output is never fed back in. Names with spaces, quotes or accents work. Stream-copy or re-encode to H.264/AAC. No reorder UI yet." />
+              <OpDoc name="Add Subtitles" desc="Burn-in (hardcode) or soft-embed subtitle streams already present in the input file. Pick which subtitle track to use. Burn-in needs an ffmpeg build with libass (ffmpeg-full on macOS); without it, or when the file has no subtitle tracks, Settings says so and won't run. Font, size, and position customization are not yet exposed." />
               <OpDoc name="Create GIF" desc="Frame rate (10/15/24 fps), width presets, palette generation and paletteuse for quality, start time and duration selection. Output is GIF only today; WebP output is planned." />
-              <OpDoc name="Extract Thumbnails" desc="Single frame at a timestamp, 4x4 contact sheet, or one frame every 5 seconds. Output is PNG." />
+              <OpDoc name="Extract Thumbnails" desc="Single frame at a timestamp (defaults to mid-clip for clips up to 10s), 4x4 contact sheet, or one frame every 5 seconds written as name_extract_thumbnails_001.png, _002.png, and so on. Output is PNG." />
               <OpDoc name="Watermark" desc="Overlays a solid white color box. Five positions (four corners and center), opacity (25/50/75%), and size presets (small/medium/large). Image and text watermarks are planned." />
-              <OpDoc name="Audio Adjustments" desc="Normalize (loudnorm), volume up/down (dB), fade in + fade out (2s, auto-clamped to input duration), or remove audio entirely." />
+              <OpDoc name="Audio Adjustments" desc="Normalize (loudnorm), volume up/down by 3, 6 or 10 dB, fade in + fade out (2s, auto-clamped to input duration), or remove audio entirely." />
               <OpDoc name="Video Filters" desc="Stabilize (vidstab when available; falls back to deshake with a warning in Settings), deinterlace (yadif), speed 2x/0.5x, rotate 90°, horizontal/vertical flip. Crop and color filters are planned." />
             </div>
           </Section>
@@ -160,10 +160,14 @@ export default function DocsPage() {
           <Section id="keybindings" title="Keybindings">
             <h3 className="text-lg font-semibold text-white mb-3">Global</h3>
             <KeyTable keys={[
-              ["q", "Quit"],
+              ["q", "Quit (stops a running encode first)"],
               ["Ctrl+C", "Force quit"],
               ["?", "Toggle help overlay"],
             ]} />
+            <p className="mt-3">
+              While a text field or the path input has focus, <Code>q</Code> and{" "}
+              <Code>?</Code> are typed as characters.
+            </p>
 
             <h3 className="text-lg font-semibold text-white mt-6 mb-3">Navigation</h3>
             <KeyTable keys={[
@@ -189,7 +193,7 @@ export default function DocsPage() {
 
             <h3 className="text-lg font-semibold text-white mt-6 mb-3">Progress</h3>
             <KeyTable keys={[
-              ["Esc", "Cancel (with confirmation)"],
+              ["Esc", "Cancel (with confirmation); on a failed job, back to Settings"],
               ["y / n", "Confirm or deny cancellation"],
             ]} />
           </Section>
@@ -211,11 +215,11 @@ export default function DocsPage() {
               ]}
             />
             <div className="mt-4 space-y-2">
-              <Li><Code>default_output_dir</Code> — Where output files are saved (empty = same as input)</Li>
+              <Li><Code>default_output_dir</Code> — Where output files are saved (empty = same as input; must be an existing directory)</Li>
               <Li><Code>theme</Code> — Color theme (<Code>dark</Code> or <Code>light</Code>)</Li>
               <Li><Code>recent_files</Code> — Last 10 files used (auto-populated)</Li>
-              <Li><Code>hw_accel</Code> — Hardware acceleration: auto, off, videotoolbox, nvenc, vaapi</Li>
-              <Li><Code>ffmpeg_path</Code> — Override ffmpeg binary path (empty = auto-detect)</Li>
+              <Li><Code>hw_accel</Code> — Reserved; not applied to encodes yet</Li>
+              <Li><Code>ffmpeg_path</Code> — Reserved; not read yet (ffmpeg is found on PATH, next to the binary, or in Homebrew&apos;s ffmpeg/ffmpeg-full kegs)</Li>
             </div>
             <p className="mt-4">
               Passing <Code>--theme dark|light</Code> overrides the config theme for that run.
@@ -234,12 +238,13 @@ export default function DocsPage() {
           <Section id="progress" title="Progress Screen">
             <p>The progress screen parses ffmpeg&apos;s stderr in real-time:</p>
             <ul className="space-y-2 mt-4">
-              <Li><strong>Gradient progress bar</strong> — green (0%) to cyan (100%), adapts to terminal width</Li>
+              <Li><strong>Gradient progress bar</strong> — green (0%) to cyan (100%), adapts to terminal width, measured against the expected output length (trims, GIFs and speed changes reach 100%)</Li>
               <Li><strong>ETA</strong> — Smoothed with rolling average over last 5 updates to avoid jitter</Li>
               <Li><strong>Stats</strong> — Elapsed, speed, FPS, frames, output size, bitrate</Li>
               <Li><strong>Braille spinner</strong> — For indeterminate operations (stream copy, concat)</Li>
               <Li><strong>Live log</strong> — Scrollable raw ffmpeg output, last 6 lines visible</Li>
-              <Li><strong>Cancel</strong> — Esc opens confirmation, y sends SIGINT and cleans up partial output</Li>
+              <Li><strong>Cancel</strong> — Esc opens confirmation; y stops ffmpeg (SIGINT, force-killed after 3s; killed directly on Windows) and removes the partial output. Quitting mid-encode does the same</Li>
+              <Li><strong>Errors</strong> — A failed job shows the first ffmpeg error line plus a plain-English explanation; Esc returns to Settings</Li>
             </ul>
           </Section>
 
@@ -252,16 +257,17 @@ export default function DocsPage() {
             </p>
             <div className="mt-4 space-y-2">
               <Li>Trim → the End Time field is pre-filled with the input&apos;s total duration</Li>
-              <Li>Add Subtitles → the Subtitle Track selector lists the subtitle streams detected in the input (codec and language, when present); if none are found, burn-in is disabled automatically</Li>
+              <Li>Add Subtitles → the Subtitle Track selector lists the subtitle streams detected in the input (codec and language, when present); if none are found, Settings says so and won&apos;t run</Li>
               <Li>Audio Adjustments (fade) → the fade-out start is clamped to the input duration so short clips don&apos;t produce an invalid filter</Li>
               <Li>Video Filters → if vidstab is unavailable, Stabilize automatically uses <Code>deshake</Code> and shows a fallback warning in Settings</Li>
+              <Li>Convert → codecs a container can&apos;t hold are swapped (WebM → VP9 + Opus, MOV → H.264) with a notice</Li>
+              <Li>Extract Audio / Audio Adjustments → blocked with a message when the file has no audio track</Li>
+              <Li>Extract Thumbnails → the timestamp defaults to mid-clip for clips up to 10s</Li>
               <Li>File Picker → shows an inline ffprobe preview (format, duration, size, video codec/resolution/fps, audio codec/channels/sample-rate, subtitle track count) while you&apos;re browsing</Li>
             </div>
             <p className="mt-4">
-              More ambitious defaults -- suggesting an output codec based on
-              the input, graying out upscale targets, pre-selecting AAC for
-              stream copy, and so on -- are tracked in{" "}
-              <Code>docs/future_scope.md</Code>.
+              Not done yet: suggesting an output codec from the input, graying
+              out upscale targets, and pre-selecting AAC for stream copy.
             </p>
           </Section>
         </article>

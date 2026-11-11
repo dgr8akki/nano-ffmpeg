@@ -97,23 +97,26 @@ The TUI takes you from there: pick an operation, tweak the pre-filled defaults, 
 - Pre-filled defaults for every operation so you can hit Enter without thinking about flags
 - Command preview on every settings screen -- see the exact `ffmpeg` command before it runs
 - Trim pre-fills the input's total duration; Stabilize automatically falls back to `deshake` if `vidstab` isn't in your ffmpeg build
+- Input checks before anything runs: bad or out-of-range times, end before start, missing audio/video/subtitle streams, and burn-in without libass are shown inline and block Enter
+- Container-aware Convert: WebM switches to VP9 + Opus and MOV swaps AV1/VP9 for H.264, with a notice, instead of failing in ffmpeg
 
 **Progress Tracking**
-- Gradient progress bar (green-to-cyan) with percentage
+- Gradient progress bar (green-to-cyan) with percentage, measured against the expected output length (so trims, GIFs and speed changes reach 100%)
 - Real-time stats: elapsed, ETA (smoothed over rolling window), speed, FPS, bitrate, frames, output size
 - Braille-dot spinner for indeterminate operations (stream copy, concat)
 - Scrollable live log of raw ffmpeg output
-- Cancel with confirmation (`Esc` > `y`)
+- Cancel with confirmation (`Esc` > `y`); quitting mid-encode also stops ffmpeg, and both remove the partial output
+- Failed jobs show the first ffmpeg error plus a plain-English explanation; `Esc` returns to Settings
 
 **File Handling**
 - Built-in file browser with directory navigation
-- Path input mode (toggle with `/`) for when you know exactly where your file is
+- Path input mode (toggle with `/`) for when you know exactly where your file is; accepts pasted paths and `~`
 - Inline `ffprobe` metadata preview: codec, resolution, framerate, audio, duration, size
 - Recent files list on the home screen
 
 **Intelligence**
 - Capability detection: probes your ffmpeg build on startup and reports codec/format/filter/HW-accel counts on the Home screen
-- Hardware acceleration detection: shows available accelerators (VideoToolbox, NVENC, VAAPI) on Home (note: detected accelerators are not yet applied to encode commands -- see `docs/future_scope.md`)
+- Hardware acceleration detection: shows available accelerators (VideoToolbox, NVENC, VAAPI) on Home (detected accelerators are not applied to encode commands yet)
 - Human-readable error translation: converts cryptic ffmpeg errors into actionable messages
 - Capability cache at `~/.config/nano-ffmpeg/capabilities.json` (invalidated on version change)
 
@@ -127,7 +130,7 @@ The TUI takes you from there: pick an operation, tweak the pre-filled defaults, 
 
 - **ffmpeg** and **ffprobe** installed and available in `$PATH`
 - For full Stabilize support (`vidstabdetect`/`vidstabtransform`), use an ffmpeg build with `libvidstab` (Homebrew: `ffmpeg-full`)
-- Go 1.22+ (for building from source)
+- Go 1.26+ (for building from source, per `go.mod`)
 - Terminal: 80x24 minimum
 
 ### Installing ffmpeg
@@ -257,17 +260,17 @@ nano-ffmpeg -d ~/Videos/interview.mp4
 
 | Operation | What it does | Key settings |
 |-----------|-------------|--------------|
-| **Convert Format** | Change container/codec | MP4, MKV, WebM, AVI, MOV; H.264, H.265, AV1, VP9; CRF quality, preset speed, audio codec |
-| **Extract Audio** | Strip video, keep audio track | MP3, AAC, FLAC, WAV, OGG, Opus; bitrate presets (64k-320k) |
-| **Resize / Scale** | Change output height | 4K, 1080p, 720p, 480p, 360p; H.264 or H.265 (aspect ratio field is shown but currently has no effect -- see `docs/future_scope.md`) |
-| **Trim / Cut** | Cut segments by time | Start/end time (end pre-filled from ffprobe); lossless cut (stream copy) toggle |
-| **Compress** | Reduce file size | CRF quality; H.264/H.265/AV1; preset speed (the Two-Pass toggle is shown but currently inert -- see `docs/future_scope.md`) |
-| **Merge / Concat** | Join multiple files in the same folder with the same extension | Alphabetical order; stream copy or re-encode to H.264/AAC |
-| **Add Subtitles** | Burn-in or embed existing subtitle streams from the input | Picks a subtitle track from the input file; font/size/position customization is not yet exposed |
+| **Convert Format** | Change container/codec | MP4, MKV, WebM, AVI, MOV; H.264, H.265, AV1, VP9; CRF quality, preset speed, audio codec. Incompatible picks are swapped (WebM → VP9 + Opus, MOV → H.264 instead of AV1/VP9) |
+| **Extract Audio** | Strip video, keep audio track | MP3, AAC, FLAC, WAV, OGG, Opus; bitrate presets (64k-320k, ignored for FLAC/WAV). OGG uses Opus when your ffmpeg lacks libvorbis |
+| **Resize / Scale** | Change output height | 4K, 1080p, 720p, 480p, 360p; width follows the source aspect ratio (rounded to even); H.264 or H.265 |
+| **Trim / Cut** | Cut a segment by time | Start/end as `HH:MM:SS`, `MM:SS` or seconds (end pre-filled from ffprobe); lossless cut (stream copy) starts on the nearest keyframe |
+| **Compress** | Reduce file size | CRF quality; H.264/H.265/AV1; preset speed |
+| **Merge / Concat** | Join every file in the input's folder with the same extension | Alphabetical order, listed in Settings before you run it; stream copy or re-encode to H.264/AAC |
+| **Add Subtitles** | Burn in or re-mux subtitle streams already in the input | Picks a subtitle track; burn-in needs ffmpeg with libass (`ffmpeg-full` on macOS). External `.srt` files and styling are not supported yet |
 | **Create GIF** | Animated GIF from video | 10/15/24 fps; width presets; palette optimization (only GIF output today; WebP planned) |
-| **Extract Thumbnails** | Grab frames as images (PNG) | Single frame at a timestamp, 4x4 contact sheet, or every 5 seconds |
+| **Extract Thumbnails** | Grab frames as images (PNG) | Single frame at a timestamp (defaults to mid-clip for clips up to 10s), 4x4 contact sheet, or every 5 seconds (`name_extract_thumbnails_001.png`, `_002.png`, ...) |
 | **Watermark** | Overlay a solid white color box | 5-position grid (corners + center), opacity, size presets (image and text overlays planned) |
-| **Audio Adjustments** | Normalize, volume, fade | loudnorm, dB boost/reduce, fade in/out, remove audio |
+| **Audio Adjustments** | Normalize, volume, fade | loudnorm, volume up/down by 3/6/10 dB, 2s fade in/out, remove audio |
 | **Video Filters** | Stabilize, deinterlace, speed, rotate, flip | vidstab (or deshake fallback), yadif, 2x/0.5x speed, rotate 90°, horizontal/vertical flip |
 
 ## Progress Screen
@@ -299,9 +302,11 @@ nano-ffmpeg -d ~/Videos/interview.mp4
 
 | Key | Action |
 |-----|--------|
-| `q` | Quit |
+| `q` | Quit (stops a running encode first) |
 | `Ctrl+C` | Force quit |
 | `?` | Toggle help overlay |
+
+While a text field or the path input has focus, `q` and `?` are typed as characters.
 
 ### Navigation
 
@@ -332,7 +337,7 @@ nano-ffmpeg -d ~/Videos/interview.mp4
 
 | Key | Action |
 |-----|--------|
-| `Esc` | Cancel (with confirmation) |
+| `Esc` | Cancel (with confirmation); on a failed job, back to Settings |
 | `y` / `n` | Confirm or deny cancellation |
 
 ## Configuration
@@ -354,13 +359,15 @@ Config is stored at `~/.config/nano-ffmpeg/config.json`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `default_output_dir` | `""` (same as input) | Where output files are saved |
+| `default_output_dir` | `""` (same as input) | Where output files are saved; must be an existing directory |
 | `theme` | `"dark"` | Color theme: `dark` or `light` |
 | `recent_files` | `[]` | Last 10 files used (auto-populated) |
-| `hw_accel` | `"auto"` | Hardware acceleration: `auto`, `off`, `videotoolbox`, `nvenc`, `vaapi` |
-| `ffmpeg_path` | `""` (auto-detect) | Override ffmpeg binary path |
+| `hw_accel` | `"auto"` | Reserved; not applied to encodes yet |
+| `ffmpeg_path` | `""` | Reserved; not read yet. ffmpeg is found on `PATH`, next to the binary, or in Homebrew's `ffmpeg`/`ffmpeg-full` kegs |
 
 Capabilities are cached separately at `~/.config/nano-ffmpeg/capabilities.json` and auto-invalidated when your ffmpeg version changes.
+
+Merge and Stabilize write their scratch files (`nano-ffmpeg-merge.ffconcat`, `nano-ffmpeg-vidstab.trf`) to the system temp directory, not next to your videos.
 
 If you pass `--theme dark|light` (or `-t dark|light`), it overrides the config theme for that run.
 If you pass `--dir <directory|file>` (or `-d <directory|file>`), it overrides startup location for that run.
@@ -392,6 +399,7 @@ nano-ffmpeg/
 │   │   ├── preset.go                    # Quality / resolution / format preset catalog
 │   │   └── preset_test.go
 │   ├── screens/
+│   │   ├── settings/e2e_test.go         # Runs every operation against real ffmpeg (-tags e2e)
 │   │   ├── screen.go                    # Screen interface definition
 │   │   ├── messages.go                  # Shared navigation/status messages
 │   │   ├── screens_test.go
@@ -415,11 +423,6 @@ nano-ffmpeg/
 │   └── release.yml                      # GoReleaser on tag push
 ├── .goreleaser.yaml                     # Cross-platform build + Homebrew tap + Scoop bucket config
 ├── homebrew/nano-ffmpeg.rb              # Formula template (reference)
-├── docs/
-│   ├── design/                          # Original design spec and implementation plan
-│   ├── future_scope.md                  # Gap-closing roadmap (see Future Roadmap below)
-│   ├── release.sh                       # Single-command tag + push + workflow watch
-│   └── Makefile                         # `make release[-minor|-major]` wrappers
 ├── go.mod
 ├── go.sum
 └── README.md
@@ -429,7 +432,7 @@ nano-ffmpeg/
 
 | Component | Library | Purpose |
 |-----------|---------|---------|
-| Language | Go 1.22+ | Single binary, no runtime dependency |
+| Language | Go 1.26+ | Single binary, no runtime dependency |
 | TUI framework | [Bubble Tea](https://github.com/charmbracelet/bubbletea) | Elm-architecture terminal UI |
 | Styling | [Lip Gloss](https://github.com/charmbracelet/lipgloss) | Composable terminal styles |
 | Components | [Bubbles](https://github.com/charmbracelet/bubbles) | Pre-built TUI components |
@@ -452,6 +455,11 @@ go test ./internal/screens/settings/ -v
 
 # Ignore the cache
 go test -count=1 ./...
+
+# End-to-end: builds every operation's command through the Settings screen,
+# runs it with your local ffmpeg on generated sample media, and checks the
+# output with ffprobe (~30s, needs ffmpeg + ffprobe on PATH)
+go test -tags e2e ./internal/screens/settings/ -run E2E -v
 ```
 
 Snapshot of coverage by area:
@@ -460,7 +468,8 @@ Snapshot of coverage by area:
 - **App / config (`internal/app/`)** -- recent-files dedup and cap, config load/save defaults, initial-file startup path.
 - **ffmpeg (`internal/ffmpeg/`)** -- command builder (convert/trim/extract/resize + extras), capability parsing, ffprobe JSON parsing, runner lifecycle, progress/ETA smoothing, error translation, detect helpers.
 - **Preset catalog (`internal/preset/`)** -- option tables for video/audio/gif/compress presets.
-- **Screens (`internal/screens/*`)** -- filepicker, home, operations, settings (per-op form building + command assembly), progress, result, screen-router messages.
+- **Screens (`internal/screens/*`)** -- filepicker, home, operations, settings (per-op form building, command assembly, input validation, time parsing, filter-path escaping), progress, result, screen-router messages.
+- **End-to-end (`-tags e2e`)** -- 110 cases: every format/codec pair, every operation option, odd dimensions, portrait, audio-only and video-only inputs, names with spaces, quotes, `%` and accents, and invalid inputs that must be blocked.
 - **UI (`internal/ui/`)** -- theme palette/style build, responsive size checks, help overlay layout, frame rendering.
 
 ## Releasing
@@ -496,7 +505,7 @@ gh run watch
 
 ## Future Roadmap
 
-See [`docs/future_scope.md`](docs/future_scope.md) for the full plan, including the feature gaps surfaced by the README/website sync audit (watermark image/text overlays, subtitle styling, crop/color filters, two-pass encoding, clipboard copy, capability-driven filtering, hardware-accelerated encoding, WebP output, aspect-ratio handling, merge reordering, smart defaults).
+Known gaps: watermark image/text overlays, external subtitle files and styling, crop/color filters, two-pass encoding, copy-command-to-clipboard, hardware-accelerated encoding, WebP output, aspect-ratio crop/pad, merge reordering, and progress for Merge (measured against the first file only).
 
 Longer-term ideas tracked but not in v0.1.0:
 

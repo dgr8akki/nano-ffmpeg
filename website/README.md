@@ -77,8 +77,6 @@ When a CLI flag, operation, keybinding, or config field changes, update **both**
 1. [`../README.md`](../README.md) (the canonical source of truth).
 2. [`app/docs/page.tsx`](app/docs/page.tsx) (user-facing docs surface).
 
-The audit-style checklist in [`../docs/future_scope.md`](../docs/future_scope.md) calls out what should match.
-
 > Tip: React's `react/no-unescaped-entities` rule will fail `npm run lint` if you write raw apostrophes in JSX text. Use `&apos;` in copy like `input&apos;s total duration`.
 
 ## Deployment
