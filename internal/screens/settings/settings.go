@@ -48,6 +48,9 @@ type Field struct {
 // ExecuteMsg tells the app to run the ffmpeg command.
 type ExecuteMsg struct {
 	Commands []*ffmpeg.Command
+	// Duration is the expected output length in seconds (0 = use the input's),
+	// so progress reaches 100% for trims, GIFs and speed changes.
+	Duration float64
 }
 
 // Model is the settings screen model.
@@ -80,6 +83,14 @@ func New(opID operations.OperationID, opName string, filePath string, probe *ffm
 	return m
 }
 
+// SetOutputDir writes outputs to dir instead of next to the input. Ignored
+// unless dir is an existing directory.
+func (m *Model) SetOutputDir(dir string) {
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		m.outputDir = dir
+	}
+}
+
 func (m *Model) Init() tea.Cmd {
 	return nil
 }
@@ -108,14 +119,16 @@ func (m *Model) Update(msg tea.Msg) (screens.Screen, tea.Cmd) {
 		case "right", "l":
 			m.adjustField(1)
 		case "enter":
+			if m.validationError() != "" {
+				return m, nil
+			}
 			commands := m.buildCommands()
+			duration := m.expectedDuration()
 			return m, func() tea.Msg {
-				return ExecuteMsg{Commands: commands}
+				return ExecuteMsg{Commands: commands, Duration: duration}
 			}
 		case "esc":
 			return m, func() tea.Msg { return screens.BackMsg{} }
-		case "c":
-			// Copy command to clipboard (handled by app)
 		}
 	}
 	return m, nil
@@ -260,6 +273,11 @@ func (m *Model) View() string {
 		b.WriteString(ui.WarningStyle.Render("  " + notice))
 		b.WriteString("\n")
 	}
+	if verr := m.validationError(); verr != "" {
+		b.WriteString("\n")
+		b.WriteString(ui.ErrorStyle.Render("  " + verr))
+		b.WriteString("\n")
+	}
 
 	// Output info
 	b.WriteString("\n")
@@ -349,15 +367,25 @@ func (m *Model) KeyHints() []ui.KeyHint {
 		{Key: "↑↓", Desc: "Field"},
 		{Key: "←→", Desc: "Change"},
 		{Key: "Enter", Desc: "Execute"},
-		{Key: "c", Desc: "Copy cmd"},
 		{Key: "Esc", Desc: "Back"},
 	}
+}
+
+// CapturesText reports whether keystrokes should go to a text field instead
+// of global shortcuts like q and ?.
+func (m *Model) CapturesText() bool {
+	return m.cursor >= 0 && m.cursor < len(m.fields) && m.fields[m.cursor].Type == FieldText
 }
 
 func (m *Model) outputPath() string {
 	ext := m.outputExtension()
 	base := strings.TrimSuffix(filepath.Base(m.filePath), filepath.Ext(m.filePath))
-	return filepath.Join(m.outputDir, base+"_"+operationSlug(m.opName)+"."+ext)
+	suffix := ""
+	if m.opID == operations.OpThumbnails && m.fieldValue("Mode") == "interval" {
+		base = strings.ReplaceAll(base, "%", "%%") // literal % in a pattern name
+		suffix = "_%03d"                           // image sequence: one file per frame
+	}
+	return filepath.Join(m.outputDir, base+"_"+operationSlug(m.opName)+suffix+"."+ext)
 }
 
 func (m *Model) outputExtension() string {
@@ -495,13 +523,6 @@ func (m *Model) resizeFields() []Field {
 			Selected: 1,
 		},
 		{
-			Label:    "Aspect Ratio",
-			Type:     FieldSelect,
-			Options:  []Option{{Label: "Keep Original", Value: "keep"}, {Label: "16:9", Value: "16:9"}, {Label: "4:3", Value: "4:3"}, {Label: "Crop to Fit", Value: "crop"}},
-			Value:    "keep",
-			Selected: 0,
-		},
-		{
 			Label:    "Codec",
 			Type:     FieldSelect,
 			Options:  []Option{{Label: "H.264", Value: "libx264"}, {Label: "H.265", Value: "libx265"}},
@@ -560,12 +581,6 @@ func (m *Model) compressFields() []Field {
 			Options:  []Option{{Label: "Slow (Better)", Value: "slow"}, {Label: "Medium", Value: "medium"}, {Label: "Fast", Value: "fast"}},
 			Value:    "medium",
 			Selected: 1,
-		},
-		{
-			Label:   "Two-Pass",
-			Type:    FieldToggle,
-			Enabled: false,
-			Value:   "false",
 		},
 	}
 }
@@ -673,6 +688,10 @@ func (m *Model) gifFields() []Field {
 }
 
 func (m *Model) thumbnailFields() []Field {
+	ts := "00:00:05"
+	if m.probeResult != nil && m.probeResult.Format.Duration > 0 && m.probeResult.Format.Duration <= 10 {
+		ts = formatFFmpegSeconds(math.Floor(m.probeResult.Format.Duration*50) / 100) // middle of short clips
+	}
 	return []Field{
 		{
 			Label:    "Mode",
@@ -684,8 +703,8 @@ func (m *Model) thumbnailFields() []Field {
 		{
 			Label:  "Timestamp",
 			Type:   FieldText,
-			Value:  "00:00:05",
-			Cursor: len([]rune("00:00:05")),
+			Value:  ts,
+			Cursor: len([]rune(ts)),
 		},
 	}
 }
@@ -702,7 +721,7 @@ func (m *Model) audioFields() []Field {
 		{
 			Label:    "Volume (dB)",
 			Type:     FieldSelect,
-			Options:  []Option{{Label: "+3 dB", Value: "3"}, {Label: "+6 dB", Value: "6"}, {Label: "-3 dB", Value: "-3"}, {Label: "-6 dB", Value: "-6"}},
+			Options:  []Option{{Label: "3 dB", Value: "3"}, {Label: "6 dB", Value: "6"}, {Label: "10 dB", Value: "10"}},
 			Value:    "3",
 			Selected: 0,
 		},
@@ -766,16 +785,17 @@ func (m *Model) buildCommands() []*ffmpeg.Command {
 }
 
 func (m *Model) buildStabilizeCommands() []*ffmpeg.Command {
-	transformPath := filepath.Join(m.outputDir, ".nano-ffmpeg-vidstab.trf")
-	escapedTransformPath := escapeSubtitlesPath(transformPath)
+	// ponytail: fixed temp name, two concurrent stabilize runs would clash
+	transformPath := filepath.Join(os.TempDir(), "nano-ffmpeg-vidstab.trf")
+	escapedTransformPath := escapeFilterPath(transformPath)
 
 	detect := ffmpeg.NewCommand(m.ffmpegPath, m.filePath, "-")
-	detect.AddVideoFilter(fmt.Sprintf("vidstabdetect=result='%s'", escapedTransformPath))
+	detect.AddVideoFilter("vidstabdetect=result=" + escapedTransformPath)
 	detect.NoAudio()
 	detect.AddArgs("-f", "null")
 
 	transform := ffmpeg.NewCommand(m.ffmpegPath, m.filePath, m.outputPath())
-	transform.AddVideoFilter(fmt.Sprintf("vidstabtransform=input='%s'", escapedTransformPath))
+	transform.AddVideoFilter("vidstabtransform=input=" + escapedTransformPath)
 	transform.SetAudioCodec("copy")
 
 	return []*ffmpeg.Command{detect, transform}
@@ -793,7 +813,7 @@ func (m *Model) vidstabSupported() bool {
 		return m.vidstabOK
 	}
 	m.vidstabKnown = true
-	m.vidstabOK = hasFFmpegFilter(m.ffmpegPath, "vidstabdetect") && hasFFmpegFilter(m.ffmpegPath, "vidstabtransform")
+	m.vidstabOK = ffmpegHas(m.ffmpegPath, "-filters", "vidstabdetect") && ffmpegHas(m.ffmpegPath, "-filters", "vidstabtransform")
 	return m.vidstabOK
 }
 
@@ -810,10 +830,182 @@ func (m *Model) commandPreview() string {
 }
 
 func (m *Model) fallbackNotice() string {
-	if m.opID == operations.OpFilters && m.fieldValue("Filter") == "vidstab" && !m.vidstabSupported() {
-		return "vidstab filters unavailable in your ffmpeg build; using deshake fallback."
+	switch m.opID {
+	case operations.OpFilters:
+		if m.fieldValue("Filter") == "vidstab" && !m.vidstabSupported() {
+			return "vidstab filters unavailable in your ffmpeg build; using deshake fallback."
+		}
+	case operations.OpConvert:
+		video, audio := m.convertCodecs()
+		if video != m.fieldValue("Codec") || audio != m.fieldValue("Audio") {
+			return fmt.Sprintf("%s can't hold the selected codecs; using %s video + %s audio.", strings.ToUpper(m.fieldValue("Format")), video, audio)
+		}
+	case operations.OpMerge:
+		if files, err := m.mergeFiles(); err == nil {
+			list := strings.Join(files, ", ")
+			if len(files) > 6 {
+				list = strings.Join(files[:6], ", ") + fmt.Sprintf(", … (+%d more)", len(files)-6)
+			}
+			return fmt.Sprintf("Joins %d file(s) in this folder, in this order: %s", len(files), list)
+		}
+	case operations.OpExtractAudio:
+		if m.fieldValue("Format") == "ogg" && m.oggCodec() != "libvorbis" {
+			return "libvorbis is not in your ffmpeg build; writing Opus audio into the .ogg file."
+		}
 	}
 	return ""
+}
+
+// validationError explains why the current settings can't run, or "".
+// Enter is blocked while it is non-empty.
+func (m *Model) validationError() string {
+	p := m.probeResult
+	duration := 0.0
+	if p != nil {
+		duration = p.Format.Duration
+	}
+	hasAudio := p == nil || p.AudioStream() != nil
+	hasVideo := p == nil || p.VideoStream() != nil
+
+	checkTime := func(label string, allowEmpty bool) (float64, string) {
+		v := strings.TrimSpace(m.fieldValue(label))
+		if v == "" {
+			if allowEmpty {
+				return -1, ""
+			}
+			return 0, label + " is required."
+		}
+		t, ok := parseTime(v)
+		if !ok {
+			return 0, label + " must be HH:MM:SS, MM:SS or seconds."
+		}
+		if duration > 0 && t >= duration {
+			return 0, fmt.Sprintf("%s is past the end of the file (%s).", label, formatFFmpegSeconds(math.Floor(duration*100)/100)+"s")
+		}
+		return t, ""
+	}
+
+	switch m.opID {
+	case operations.OpExtractAudio:
+		if !hasAudio {
+			return "This file has no audio track to extract."
+		}
+	case operations.OpAudio:
+		if !hasAudio {
+			return "This file has no audio track to adjust."
+		}
+	case operations.OpResize, operations.OpCompress, operations.OpGIF,
+		operations.OpThumbnails, operations.OpWatermark, operations.OpSubtitles:
+		if !hasVideo {
+			return "This operation needs a video stream; the file is audio-only."
+		}
+	case operations.OpFilters:
+		if !hasVideo {
+			return "Video filters need a video stream; the file is audio-only."
+		}
+	}
+
+	switch m.opID {
+	case operations.OpTrim:
+		start, err := checkTime("Start Time", true)
+		if err != "" {
+			return err
+		}
+		v := strings.TrimSpace(m.fieldValue("End Time"))
+		if v != "" {
+			end, ok := parseTime(v)
+			if !ok {
+				return "End Time must be HH:MM:SS, MM:SS or seconds."
+			}
+			if end <= start {
+				return "End Time must be after Start Time."
+			}
+		}
+	case operations.OpGIF:
+		if _, err := checkTime("Start Time", true); err != "" {
+			return err
+		}
+		if d := strings.TrimSpace(m.fieldValue("Duration")); d != "" {
+			if t, ok := parseTime(d); !ok || t <= 0 {
+				return "Duration must be a positive number of seconds."
+			}
+		}
+	case operations.OpThumbnails:
+		if m.fieldValue("Mode") == "single" {
+			if _, err := checkTime("Timestamp", false); err != "" {
+				return err
+			}
+		}
+	case operations.OpSubtitles:
+		if p != nil && len(p.SubtitleStreams()) == 0 {
+			return "This file has no subtitle tracks."
+		}
+		if m.fieldValue("Subtitle Mode") == "burn" && !ffmpegHas(m.ffmpegPath, "-filters", "subtitles") {
+			return "Burn-in needs ffmpeg built with libass (macOS: brew install ffmpeg-full). Embed still works."
+		}
+	}
+	return ""
+}
+
+// expectedDuration is the output length in seconds when it differs from the
+// input's (0 = same as input).
+func (m *Model) expectedDuration() float64 {
+	total := 0.0
+	if m.probeResult != nil {
+		total = m.probeResult.Format.Duration
+	}
+	clip := func(start, length float64) float64 {
+		if total > 0 && start+length > total {
+			length = total - start
+		}
+		return math.Max(length, 0)
+	}
+	switch m.opID {
+	case operations.OpTrim:
+		start, _ := parseTime(m.fieldValue("Start Time"))
+		end, ok := parseTime(m.fieldValue("End Time"))
+		if !ok {
+			end = total
+		}
+		return math.Max(end-start, 0)
+	case operations.OpGIF:
+		start, _ := parseTime(m.fieldValue("Start Time"))
+		if d, ok := parseTime(m.fieldValue("Duration")); ok {
+			return clip(start, d)
+		}
+		return clip(start, total)
+	case operations.OpFilters:
+		switch m.fieldValue("Filter") {
+		case "speed2":
+			return total / 2
+		case "speed05":
+			return total * 2
+		}
+	}
+	// ponytail: Merge still measures against the first file only; summing
+	// would mean probing every file in the folder.
+	return 0
+}
+
+// parseTime accepts ffmpeg time syntax: SS[.ms], MM:SS[.ms] or HH:MM:SS[.ms].
+func parseTime(s string) (float64, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, false
+	}
+	parts := strings.Split(s, ":")
+	if len(parts) > 3 {
+		return 0, false
+	}
+	total := 0.0
+	for i, part := range parts {
+		v, err := strconv.ParseFloat(part, 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || (i > 0 && v >= 60) || (i < len(parts)-1 && strings.Contains(part, ".")) {
+			return 0, false
+		}
+		total = total*60 + v
+	}
+	return total, true
 }
 
 func (m *Model) fieldValue(label string) string {
@@ -834,13 +1026,35 @@ func (m *Model) fieldEnabled(label string) bool {
 	return false
 }
 
+// convertCodecs returns the video/audio codecs actually used for Convert,
+// swapping in ones the chosen container accepts.
+func (m *Model) convertCodecs() (video, audio string) {
+	video, audio = m.fieldValue("Codec"), m.fieldValue("Audio")
+	switch m.fieldValue("Format") {
+	case "webm": // VP8/VP9/AV1 + Vorbis/Opus only
+		if video != "libvpx-vp9" && video != "libsvtav1" {
+			video = "libvpx-vp9"
+		}
+		if audio != "libopus" {
+			audio = "libopus"
+		}
+	case "mov": // ffmpeg's mov muxer refuses AV1 and VP9
+		if video == "libsvtav1" || video == "libvpx-vp9" {
+			video = "libx264"
+		}
+	}
+	return video, audio
+}
+
 func (m *Model) buildConvertCommand(cmd *ffmpeg.Command) {
-	codec := m.fieldValue("Codec")
+	codec, audio := m.convertCodecs()
 	cmd.SetVideoCodec(codec)
-	crfVal := m.fieldValue("Quality")
-	cmd.SetCRF(parseInt(crfVal))
-	cmd.SetPresetForCodec(codec, m.fieldValue("Preset"))
-	audio := m.fieldValue("Audio")
+	cmd.SetCRF(parseInt(m.fieldValue("Quality")))
+	if codec == "libvpx-vp9" {
+		cmd.SetBitrate("0") // libvpx needs -b:v 0 for true constant-quality CRF
+	} else {
+		cmd.SetPresetForCodec(codec, m.fieldValue("Preset"))
+	}
 	cmd.SetAudioCodec(audio)
 }
 
@@ -857,11 +1071,22 @@ func (m *Model) buildExtractAudioCommand(cmd *ffmpeg.Command) {
 	case "wav":
 		cmd.SetAudioCodec("pcm_s16le")
 	case "ogg":
-		cmd.SetAudioCodec("libvorbis")
+		cmd.SetAudioCodec(m.oggCodec())
 	case "opus":
 		cmd.SetAudioCodec("libopus")
 	}
-	cmd.SetAudioBitrate(m.fieldValue("Bitrate"))
+	if format != "flac" && format != "wav" { // lossless: bitrate is meaningless
+		cmd.SetAudioBitrate(m.fieldValue("Bitrate"))
+	}
+}
+
+// oggCodec prefers libvorbis and falls back to Opus (also valid in .ogg) on
+// builds without it, such as Homebrew's default ffmpeg.
+func (m *Model) oggCodec() string {
+	if ffmpegHas(m.ffmpegPath, "-encoders", "libvorbis") {
+		return "libvorbis"
+	}
+	return "libopus"
 }
 
 func (m *Model) buildResizeCommand(cmd *ffmpeg.Command) {
@@ -872,11 +1097,13 @@ func (m *Model) buildResizeCommand(cmd *ffmpeg.Command) {
 }
 
 func (m *Model) buildTrimCommand(cmd *ffmpeg.Command) {
+	// Input-side -ss/-to: output-side seeking with -c copy drops every
+	// packet before the next keyframe, which can leave no video at all.
 	if start := strings.TrimSpace(m.fieldValue("Start Time")); start != "" {
-		cmd.SetStartTime(start)
+		cmd.AddInputArgs("-ss", start)
 	}
 	if end := strings.TrimSpace(m.fieldValue("End Time")); end != "" {
-		cmd.SetEndTime(end)
+		cmd.AddInputArgs("-to", end)
 	}
 	if m.fieldEnabled("Lossless Cut") {
 		cmd.StreamCopy()
@@ -899,9 +1126,10 @@ func (m *Model) buildMergeCommand(cmd *ffmpeg.Command) {
 		return
 	}
 
-	// ffconcat scripts auto-select the concat demuxer when they begin with:
-	// "ffconcat version 1.0"
 	cmd.Input = listPath
+	// -safe 0 allows absolute paths and names with spaces or accents.
+	cmd.AddInputArgs("-f", "concat")
+	cmd.AddInputArgs("-safe", "0")
 
 	if m.fieldValue("Merge Mode") == "reencode" {
 		cmd.SetVideoCodec("libx264")
@@ -933,7 +1161,7 @@ func (m *Model) buildSubtitlesCommand(cmd *ffmpeg.Command) {
 			cmd.SetAudioCodec("copy")
 			return
 		}
-		cmd.AddVideoFilter(fmt.Sprintf("subtitles='%s':si=%d", escapeSubtitlesPath(m.filePath), track))
+		cmd.AddVideoFilter(fmt.Sprintf("subtitles=%s:si=%d", escapeFilterPath(m.filePath), track))
 		cmd.SetAudioCodec("copy")
 	}
 }
@@ -946,7 +1174,7 @@ func (m *Model) buildWatermarkCommand(cmd *ffmpeg.Command) {
 	// Use a lavfi color source as the watermark layer and overlay it with position/opacity controls.
 	cmd.AddArgs("-f", "lavfi")
 	cmd.AddArgs("-i", fmt.Sprintf("color=c=white@%s:s=%s", opacity, size))
-	cmd.AddArgs("-filter_complex", fmt.Sprintf("[0:v][1:v]overlay=%s[v]", overlayPosition(position)))
+	cmd.AddArgs("-filter_complex", fmt.Sprintf("[0:v][1:v]overlay=%s:shortest=1[v]", overlayPosition(position)))
 	cmd.AddArgs("-map", "[v]")
 	cmd.AddArgs("-map", "0:a?")
 	cmd.SetVideoCodec("libx264")
@@ -961,7 +1189,7 @@ func (m *Model) buildGIFCommand(cmd *ffmpeg.Command) {
 	duration := m.fieldValue("Duration")
 
 	if startTime != "" && startTime != "00:00:00" {
-		cmd.SetStartTime(startTime)
+		cmd.AddInputArgs("-ss", startTime)
 	}
 	if duration != "" {
 		cmd.SetDuration(duration)
@@ -976,7 +1204,7 @@ func (m *Model) buildThumbnailCommand(cmd *ffmpeg.Command) {
 
 	switch mode {
 	case "single":
-		cmd.SetStartTime(timestamp)
+		cmd.AddInputArgs("-ss", timestamp)
 		cmd.AddArgs("-frames:v", "1")
 	case "grid":
 		cmd.AddVideoFilter("select='not(mod(n\\,30))',scale=320:-1,tile=4x4")
@@ -994,12 +1222,10 @@ func (m *Model) buildAudioCommand(cmd *ffmpeg.Command) {
 		cmd.AddAudioFilter("loudnorm")
 		cmd.SetVideoCodec("copy")
 	case "up":
-		db := m.fieldValue("Volume (dB)")
-		cmd.AddAudioFilter(fmt.Sprintf("volume=%sdB", db))
+		cmd.AddAudioFilter(fmt.Sprintf("volume=%sdB", m.fieldValue("Volume (dB)")))
 		cmd.SetVideoCodec("copy")
 	case "down":
-		db := m.fieldValue("Volume (dB)")
-		cmd.AddAudioFilter(fmt.Sprintf("volume=%sdB", db))
+		cmd.AddAudioFilter(fmt.Sprintf("volume=-%sdB", m.fieldValue("Volume (dB)")))
 		cmd.SetVideoCodec("copy")
 	case "fade":
 		duration := 0.0
@@ -1096,46 +1322,51 @@ func overlayPosition(position string) string {
 	}
 }
 
-func escapeSubtitlesPath(path string) string {
-	escaped := strings.ReplaceAll(path, "\\", "\\\\")
-	escaped = strings.ReplaceAll(escaped, ":", "\\:")
-	escaped = strings.ReplaceAll(escaped, "'", "\\'")
-	return escaped
+// escapeFilterPath escapes a path used as a filter option value inside a
+// -vf graph: once for the option parser, then again for the graph parser.
+// Handles Windows drive colons and names with ' [ ] , ;.
+func escapeFilterPath(path string) string {
+	value := strings.NewReplacer(`\`, `\\`, `'`, `\'`, `:`, `\:`).Replace(path)
+	return strings.NewReplacer(`\`, `\\`, `'`, `\'`, `[`, `\[`, `]`, `\]`, `,`, `\,`, `;`, `\;`).Replace(value)
 }
 
-func hasFFmpegFilter(ffmpegPath string, filterName string) bool {
-	out, err := exec.Command(ffmpegPath, "-hide_banner", "-filters").Output()
-	if err != nil {
-		return false
-	}
+// ffmpegLists caches `ffmpeg -filters` / `-encoders` output per binary.
+var ffmpegLists = map[string]map[string]bool{}
 
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
+// ffmpegHas reports whether the ffmpeg build lists name under listFlag
+// (-filters or -encoders).
+func ffmpegHas(ffmpegPath, listFlag, name string) bool {
+	key := ffmpegPath + listFlag
+	set, ok := ffmpegLists[key]
+	if !ok {
+		set = map[string]bool{}
+		if out, err := exec.Command(ffmpegPath, "-hide_banner", listFlag).Output(); err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if fields := strings.Fields(line); len(fields) >= 2 {
+					set[fields[1]] = true
+				}
+			}
 		}
-		if fields[1] == filterName {
-			return true
-		}
+		ffmpegLists[key] = set
 	}
-	return false
+	return set[name]
 }
 
-func (m *Model) writeMergeConcatFile() (string, error) {
+// mergeFiles lists, in merge order, the files Merge will join: every file in
+// the input's folder with the same extension, minus the merge output itself.
+func (m *Model) mergeFiles() ([]string, error) {
 	sourcePath := filepath.Clean(m.filePath)
-	sourceDir := filepath.Dir(sourcePath)
 	sourceExt := strings.ToLower(filepath.Ext(sourcePath))
-
-	entries, err := os.ReadDir(sourceDir)
+	entries, err := os.ReadDir(filepath.Dir(sourcePath))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
+	output := filepath.Base(m.outputPath())
 	var files []string
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") || e.Name() == output {
+			continue // never feed the merge output back into itself
 		}
 		if strings.ToLower(filepath.Ext(e.Name())) != sourceExt {
 			continue
@@ -1146,16 +1377,28 @@ func (m *Model) writeMergeConcatFile() (string, error) {
 		files = []string{filepath.Base(sourcePath)}
 	}
 	sort.Strings(files)
+	return files, nil
+}
+
+func (m *Model) writeMergeConcatFile() (string, error) {
+	sourceDir := filepath.Dir(filepath.Clean(m.filePath))
+	files, err := m.mergeFiles()
+	if err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 	b.WriteString("ffconcat version 1.0\n")
 	for _, f := range files {
+		// concat quoting: close the quote, emit an escaped ', reopen.
 		b.WriteString("file '")
-		b.WriteString(strings.ReplaceAll(f, "'", "\\'"))
+		b.WriteString(strings.ReplaceAll(filepath.Join(sourceDir, f), "'", `'\''`))
 		b.WriteString("'\n")
 	}
 
-	listPath := filepath.Join(sourceDir, ".nano-ffmpeg-merge.ffconcat")
+	// ponytail: fixed temp name, rewritten on every preview; two concurrent
+	// merges would clash.
+	listPath := filepath.Join(os.TempDir(), "nano-ffmpeg-merge.ffconcat")
 	if err := os.WriteFile(listPath, []byte(b.String()), 0644); err != nil {
 		return "", err
 	}

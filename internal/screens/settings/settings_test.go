@@ -83,7 +83,7 @@ func TestBuildCommand_MergeUsesConcatScript(t *testing.T) {
 	cmd := m.buildCommand()
 	args := strings.Join(cmd.Build(), " ")
 
-	if !strings.HasSuffix(cmd.Input, ".nano-ffmpeg-merge.ffconcat") {
+	if !strings.HasSuffix(cmd.Input, "nano-ffmpeg-merge.ffconcat") || filepath.Dir(cmd.Input) == dir {
 		t.Fatalf("expected ffconcat input file, got %q", cmd.Input)
 	}
 	if !strings.Contains(args, "-c copy") {
@@ -101,7 +101,7 @@ func TestBuildCommand_MergeUsesConcatScript(t *testing.T) {
 	if !strings.Contains(content, "ffconcat version 1.0") {
 		t.Fatalf("expected ffconcat header, got:\n%s", content)
 	}
-	if !strings.Contains(content, "file 'clip_a.mp4'") || !strings.Contains(content, "file 'clip_b.mp4'") {
+	if !strings.Contains(content, "file '"+inputA+"'") || !strings.Contains(content, "file '"+inputB+"'") {
 		t.Fatalf("expected both media files in concat script, got:\n%s", content)
 	}
 }
@@ -164,7 +164,7 @@ func TestBuildCommands_StabilizeUsesTwoPassPipeline(t *testing.T) {
 	if !strings.Contains(detectArgs, "-f null -") {
 		t.Fatalf("expected null-output first pass, got: %s", detectArgs)
 	}
-	if !strings.Contains(detectArgs, ".nano-ffmpeg-vidstab.trf") {
+	if !strings.Contains(detectArgs, "nano-ffmpeg-vidstab.trf") {
 		t.Fatalf("expected shared transform file in first pass, got: %s", detectArgs)
 	}
 
@@ -175,7 +175,7 @@ func TestBuildCommands_StabilizeUsesTwoPassPipeline(t *testing.T) {
 	if !strings.Contains(transformArgs, "-c:a copy") {
 		t.Fatalf("expected audio copy in second pass, got: %s", transformArgs)
 	}
-	if !strings.Contains(transformArgs, ".nano-ffmpeg-vidstab.trf") {
+	if !strings.Contains(transformArgs, "nano-ffmpeg-vidstab.trf") {
 		t.Fatalf("expected shared transform file in second pass, got: %s", transformArgs)
 	}
 }
@@ -368,4 +368,44 @@ func setFieldSelectValue(m *Model, label string, value string) bool {
 		}
 	}
 	return false
+}
+
+func TestParseTime(t *testing.T) {
+	ok := map[string]float64{"5": 5, "1.5": 1.5, "0:03": 3, "01:30": 90, "00:00:07.25": 7.25, "1:00:00": 3600}
+	for in, want := range ok {
+		if got, valid := parseTime(in); !valid || got != want {
+			t.Errorf("parseTime(%q) = %v,%v want %v", in, got, valid, want)
+		}
+	}
+	for _, in := range []string{"", "abc", "1:60", "-1", "1:2:3:4", "1.5:00", "NaN", "Inf"} {
+		if _, valid := parseTime(in); valid {
+			t.Errorf("parseTime(%q) should be invalid", in)
+		}
+	}
+}
+
+func TestEscapeFilterPath(t *testing.T) {
+	cases := map[string]string{
+		"/a/b.mkv":            "/a/b.mkv",
+		`C:\Users\x.mkv`:      `C\\:\\\\Users\\\\x.mkv`,
+		"/v/it's [a],b;c.mkv": `/v/it\\\'s \[a\]\,b\;c.mkv`,
+	}
+	for in, want := range cases {
+		if got := escapeFilterPath(in); got != want {
+			t.Errorf("escapeFilterPath(%q) = %q want %q", in, got, want)
+		}
+	}
+}
+
+func TestMergeExcludesItsOwnOutput(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.mp4")
+	for _, n := range []string{"a.mp4", "b.mp4", "a_merge_concat.mp4"} {
+		os.WriteFile(filepath.Join(dir, n), []byte("x"), 0644)
+	}
+	m := New(operations.OpMerge, "Merge / Concat", a, nil, "/usr/bin/ffmpeg")
+	script, _ := os.ReadFile(m.buildCommand().Input)
+	if strings.Contains(string(script), "a_merge_concat.mp4") {
+		t.Fatalf("merge list includes its own output:\n%s", script)
+	}
 }
